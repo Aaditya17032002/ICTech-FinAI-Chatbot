@@ -1,0 +1,80 @@
+{
+  "popular_funds": {
+    "sbi_bluechip": {
+      "scheme_code": "119598",
+      "name": "SBI Bluechip Fund - Direct Plan - Growth",
+      "category": "Equity - Large Cap"
+    },
+    "hdfc_top100": {
+      "scheme_code": "118989",
+      "name": "HDFC Top 100 Fund - Direct Plan - Growth",
+      "category": "Equity - Large Cap"
+    },
+    "axis_bluechip": {
+      "scheme_code": "120503",
+      "name": "Axis Bluechip Fund - Direct Plan - Growth",
+      "category": "Equity - Large Cap"
+    },
+    "mirae_large_cap": {
+      "scheme_code": "118834",
+      "name": "Mirae Asset Large Cap Fund - Direct Plan - Growth",
+      "category": "Equity - Large Cap"
+    },
+    "parag_parikh_flexi": {
+      "scheme_code": "122639",
+      "name": "Parag Parikh Flexi Cap Fund - Direct Plan - Growth",
+      "category": "Equity - Flexi Cap"
+    },
+    "uti_nifty_index": {
+      "scheme_code": "120716",
+      "name": "UTI Nifty 50 Index Fund - Direct Plan - Growth",
+      "category": "Equity - Index Fund"
+    },
+    "hdfc_index_sensex": {
+      "scheme_code": "118990",
+      "name": "HDFC Index Fund - Sensex Plan - Direct Plan - Growth",
+      "category": "Equity - Index Fund"
+    },
+    "sbi_small_cap": {
+      "scheme_code": "125497",
+      "name": "SBI Small Cap Fund - Direct Plan - Growth",
+      "category": "Equity - Small Cap"
+    },
+    "axis_midcap": {
+      "scheme_code": "120505",
+      "name": "Axis Midcap Fund - Direct Plan - Growth",
+      "category": "Equity - Mid Cap"
+    },
+    "kotak_emerging_equity": {
+      "scheme_code": "118525",
+      "name": "Kotak Emerging Equity Fund - Direct Plan - Growth",
+      "category": "Equity - Mid Cap"
+    }
+  },
+  "categories": {
+    "large_cap": ["119598", "118989", "120503", "118834"],
+    "mid_cap": ["120505", "118525"],
+    "small_cap": ["125497"],
+    "flexi_cap": ["122639"],
+    "index_funds": ["120716", "118990"],
+    "elss": []
+  },
+  "fund_houses": [
+    "SBI Mutual Fund",
+    "HDFC Mutual Fund",
+    "ICICI Prudential Mutual Fund",
+    "Axis Mutual Fund",
+    "Kotak Mahindra Mutual Fund",
+    "Nippon India Mutual Fund",
+    "Tata Mutual Fund",
+    "DSP Mutual Fund",
+    "Aditya Birla Sun Life Mutual Fund",
+    "UTI Mutual Fund",
+    "Franklin Templeton Mutual Fund",
+    "Mirae Asset Mutual Fund",
+    "PGIM India Mutual Fund",
+    "Invesco Mutual Fund",
+    "Motilal Oswal Mutual Fund",
+    "PPFAS Mutual Fund"
+  ]
+}
