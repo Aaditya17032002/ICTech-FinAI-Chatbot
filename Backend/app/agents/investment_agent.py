@@ -109,6 +109,37 @@ When comparing investments, analyze each option thoroughly before making recomme
 Use chain-of-thought reasoning to explain your analysis process.""",
 )
 
+# Simple Q&A agent - for general finance questions without data needs
+SIMPLE_QA_PROMPT = """You are a knowledgeable Indian financial advisor assistant.
+
+Answer general finance questions clearly and concisely. You specialize in:
+- Mutual funds (types, benefits, how they work)
+- Investment concepts (SIP, lumpsum, NAV, expense ratio)
+- Tax benefits (Section 80C, ELSS, capital gains)
+- Risk and diversification
+- Basic financial planning
+
+RESPONSE STYLE:
+- Be concise but comprehensive
+- Use bullet points for lists
+- Use simple language, avoid jargon
+- Give practical examples when helpful
+- Keep responses focused (2-4 paragraphs max)
+
+DO NOT:
+- Make up specific fund names or NAV values
+- Provide specific return percentages without data
+- Give personalized investment advice without knowing the user's profile
+
+If the user asks for specific fund data, NAV, or current prices, politely explain that you'd need to look up that information and ask them to rephrase their question to include specific fund names or categories."""
+
+simple_qa_agent = Agent(
+    fast_model,
+    deps_type=AgentDependencies,
+    output_type=InvestmentResponse,
+    system_prompt=SIMPLE_QA_PROMPT,
+)
+
 
 def classify_query(query: str) -> str:
     """Classify the query to determine which agent to use."""
@@ -127,6 +158,53 @@ def classify_query(query: str) -> str:
             return "reasoning"
     
     return "fast"
+
+
+def is_simple_query(query: str) -> bool:
+    """
+    Determine if query is a simple Q&A that doesn't need data fetching.
+    Simple queries are general finance questions that can be answered from knowledge.
+    """
+    query_lower = query.lower()
+    
+    # Keywords that indicate data is needed
+    data_needed_keywords = [
+        # Specific fund/stock queries
+        "nav", "price", "current", "today", "now", "latest",
+        # Performance queries
+        "return", "performance", "performing", "growth",
+        # Comparison/recommendation
+        "best", "top", "compare", "recommend", "suggest", "which",
+        # Specific entities
+        "sbi", "hdfc", "icici", "axis", "kotak", "nippon", "aditya birla",
+        "nifty", "sensex", "reliance", "tcs", "infosys",
+        # Categories with data
+        "large cap", "mid cap", "small cap", "elss", "index fund",
+        # Time-based
+        "last year", "this year", "2024", "2025", "2026",
+    ]
+    
+    # If any data keyword is present, it's not a simple query
+    for keyword in data_needed_keywords:
+        if keyword in query_lower:
+            return False
+    
+    # Keywords that indicate simple Q&A (general knowledge)
+    simple_keywords = [
+        "what is", "what are", "explain", "meaning", "definition",
+        "how does", "how do", "why", "difference between",
+        "types of", "kind of", "example", "basics",
+        "beginner", "start investing", "learn", "understand",
+        "tax benefit", "tax saving", "section 80c",
+        "sip vs lumpsum", "mutual fund vs", "equity vs debt",
+        "risk", "diversification", "portfolio", "asset allocation",
+    ]
+    
+    for keyword in simple_keywords:
+        if keyword in query_lower:
+            return True
+    
+    return False
 
 
 # Legacy functions kept for backward compatibility but now use LLM-based analyzer
@@ -435,13 +513,81 @@ def create_sources_from_data(data: dict[str, Any]) -> list[Source]:
     return sources
 
 
+async def _handle_simple_query(
+    user_message: str,
+    conversation_history: list[dict[str, str]] = None,
+    user_profile: Optional[UserProfile] = None,
+    start_time: float = None
+) -> InvestmentResponse:
+    """
+    Handle simple Q&A queries that don't need data fetching.
+    Uses the fast model for quick responses.
+    """
+    if start_time is None:
+        start_time = time.time()
+    
+    profile_summary = user_profile.get_profile_summary() if user_profile else ""
+    
+    deps = AgentDependencies(
+        user_query=user_message,
+        conversation_history=conversation_history or [],
+        fetched_data={},
+        user_profile_summary=profile_summary,
+    )
+    
+    try:
+        prompt_parts = []
+        
+        if profile_summary:
+            prompt_parts.append(f"User profile: {profile_summary}")
+        
+        if conversation_history:
+            recent = conversation_history[-4:]
+            context = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')[:200]}" for m in recent])
+            prompt_parts.append(f"Previous conversation:\n{context}")
+        
+        prompt_parts.append(f"\nUser question: {user_message}")
+        prompt_parts.append("""
+Answer this general finance question clearly and concisely.
+Use bullet points and headers where appropriate.
+Keep the response focused and practical.""")
+        
+        prompt = "\n".join(prompt_parts)
+        
+        result = await simple_qa_agent.run(prompt, deps=deps)
+        response = result.output
+        
+        # Simple queries don't have data points or sources
+        response.data_points = []
+        response.sources = []
+        response.confidence_score = 0.9
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[AGENT] Simple Q&A completed in {elapsed:.2f}s")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"[AGENT] Simple Q&A error: {e}", exc_info=True)
+        return InvestmentResponse(
+            explanation="I apologize, but I couldn't process your question. Please try rephrasing it.",
+            data_points=[],
+            sources=[],
+            risk_disclaimer="",
+            confidence_score=0.5,
+        )
+
+
 async def run_agent(
     user_message: str,
     conversation_history: list[dict[str, str]] = None,
     user_profile: Optional[UserProfile] = None
 ) -> InvestmentResponse:
     """
-    Run the investment advisor agent with multi-step data fetching.
+    Run the investment advisor agent with smart routing.
+    
+    - Simple Q&A queries: Answer directly without data fetching (fast)
+    - Data queries: Fetch data first, then generate response
     
     Args:
         user_message: The user's question
@@ -453,12 +599,21 @@ async def run_agent(
     """
     start_time = time.time()
     
+    # First, check if this is a simple Q&A that doesn't need data
+    simple_query = is_simple_query(user_message)
+    
+    if simple_query:
+        logger.info(f"[AGENT] Simple Q&A detected - answering directly without data fetch")
+        return await _handle_simple_query(user_message, conversation_history, user_profile, start_time)
+    
+    # For data-dependent queries, proceed with full flow
+    logger.info(f"[AGENT] Data query detected - fetching relevant data...")
+    
     # Parse date range from query using LLM
     date_range = await parse_date_query_async(user_message)
     if date_range:
         logger.info(f"[AGENT] Detected date range: {date_range.period_label}")
     
-    logger.info(f"[AGENT] Step 1: Fetching relevant data...")
     fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range, conversation_history)
     
     # Handle off-topic queries
