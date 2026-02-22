@@ -53,88 +53,41 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
   });
   const [recommendations, setRecommendations] = useState<Fund[]>([]);
   const [aiInsight, setAiInsight] = useState<string>("");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
-
-  const generateInsight = (category: string): string => {
-    const goalLabels: Record<string, string> = {
-      wealth: "wealth creation",
-      retirement: "retirement planning",
-      tax_saving: "tax saving under Section 80C",
-      house: "saving for a house",
-      education: "education planning",
-      travel: "travel goals",
-    };
-    
-    const riskDescriptions: Record<string, string> = {
-      conservative: "prioritize capital preservation with steady returns",
-      moderate: "balance growth potential with manageable risk",
-      aggressive: "maximize growth potential despite higher volatility",
-    };
-    
-    const horizonTips: Record<string, string> = {
-      short_term: "Consider staying liquid for flexibility",
-      medium_term: "A mix of equity and debt can optimize returns",
-      long_term: "Equity funds can help beat inflation over time",
-    };
-
-    const goal = goalLabels[preferences.goal] || preferences.goal;
-    const riskDesc = riskDescriptions[preferences.riskTolerance];
-    const horizonTip = horizonTips[preferences.investmentHorizon];
-
-    return `For ${goal}, ${category} funds are ideal as they ${riskDesc}. ${horizonTip}. With ₹${preferences.monthlyAmount.toLocaleString()}/month SIP, you can build a strong portfolio over time.`;
-  };
 
   const getRecommendations = async () => {
     setStep("loading");
     setIsLoading(true);
 
     try {
-      // Build a smart query based on user preferences
-      let category = "";
-      let query = "";
+      // Call the new LLM-powered recommendation endpoint
+      const result = await api.getAIRecommendations({
+        goal: preferences.goal,
+        risk_tolerance: preferences.riskTolerance,
+        investment_horizon: preferences.investmentHorizon,
+        monthly_amount: preferences.monthlyAmount,
+      });
 
-      // Map goal to category
-      if (preferences.goal === "tax_saving") {
-        category = "ELSS";
-        query = "ELSS tax saving direct growth";
-      } else if (preferences.riskTolerance === "conservative") {
-        if (preferences.investmentHorizon === "short_term") {
-          category = "Debt/Liquid";
-          query = "liquid fund direct";
-        } else {
-          category = "Large Cap";
-          query = "large cap direct growth";
-        }
-      } else if (preferences.riskTolerance === "aggressive") {
-        if (preferences.investmentHorizon === "long_term") {
-          category = "Small Cap";
-          query = "small cap direct growth";
-        } else {
-          category = "Mid Cap";
-          query = "mid cap direct growth";
-        }
-      } else {
-        // Moderate
-        if (preferences.investmentHorizon === "long_term") {
-          category = "Flexi Cap";
-          query = "flexi cap direct growth";
-        } else {
-          category = "Large & Mid Cap";
-          query = "large mid cap direct growth";
-        }
-      }
+      // Map funds to the expected format
+      const funds: Fund[] = (result.funds || []).map((f) => ({
+        scheme_code: f.scheme_code || "",
+        scheme_name: f.scheme_name || "Unknown Fund",
+        nav: f.nav,
+        category: f.category,
+        fund_house: f.fund_house,
+      }));
 
-      // Get fund recommendations (only API call needed)
-      const searchResult = await api.searchFunds(query, 6);
-      setRecommendations(searchResult.results || []);
-
-      // Generate insight instantly (no API call)
-      setAiInsight(generateInsight(category));
+      setRecommendations(funds);
+      setAiInsight(result.ai_insight || "");
+      setCategories(result.categories || []);
+      setAllocation(result.allocation || {});
 
       setStep("results");
     } catch (err) {
       console.error("Failed to get recommendations", err);
-      setAiInsight("We found some funds based on your preferences. Click on any fund to view details.");
+      setAiInsight("We couldn't generate recommendations right now. Please try again.");
       setStep("results");
     } finally {
       setIsLoading(false);
@@ -169,6 +122,8 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
     });
     setRecommendations([]);
     setAiInsight("");
+    setCategories([]);
+    setAllocation({});
   };
 
   const canProceed = () => {
@@ -458,7 +413,7 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
               >
                 {/* AI Insight */}
                 {aiInsight && (
-                  <div className="bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-900/20 dark:to-indigo-900/20 rounded-2xl p-4 mb-6 border border-violet-200 dark:border-violet-800">
+                  <div className="bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-900/20 dark:to-indigo-900/20 rounded-2xl p-4 mb-4 border border-violet-200 dark:border-violet-800">
                     <div className="flex items-start gap-3">
                       <div className="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center flex-shrink-0">
                         <Sparkles size={16} className="text-white" />
@@ -472,6 +427,25 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
                         </p>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Allocation Pills */}
+                {categories.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {categories.map((cat) => (
+                      <span
+                        key={cat}
+                        className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
+                      >
+                        {cat}
+                        {allocation[cat] && (
+                          <span className="text-violet-600 dark:text-violet-400">
+                            {allocation[cat]}%
+                          </span>
+                        )}
+                      </span>
+                    ))}
                   </div>
                 )}
 

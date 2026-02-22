@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.api.routes import chat, funds, health, market, profile
+from app.api.routes import chat, funds, health, market, profile, recommend
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -109,6 +109,7 @@ app.include_router(chat.router, prefix=settings.api_prefix)
 app.include_router(funds.router, prefix=settings.api_prefix)
 app.include_router(market.router, prefix=settings.api_prefix)
 app.include_router(profile.router, prefix=settings.api_prefix)
+app.include_router(recommend.router, prefix=settings.api_prefix)
 
 # Static files directory for frontend build
 STATIC_DIR = Path(__file__).parent.parent / "static"

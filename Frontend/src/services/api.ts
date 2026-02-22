@@ -133,6 +133,33 @@ export const api = {
     if (!response.ok) throw new Error("Failed to reset application");
     return response.json();
   },
+
+  async getAIRecommendations(preferences: {
+    goal: string;
+    risk_tolerance: string;
+    investment_horizon: string;
+    monthly_amount: number;
+  }): Promise<{
+    categories: string[];
+    allocation: Record<string, number>;
+    funds: Array<{
+      scheme_code?: string;
+      scheme_name?: string;
+      nav?: number;
+      category?: string;
+      fund_house?: string;
+    }>;
+    ai_insight: string;
+    reasoning: string;
+  }> {
+    const response = await fetch(`${BASE_URL}/recommend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preferences),
+    });
+    if (!response.ok) throw new Error("Failed to get AI recommendations");
+    return response.json();
+  },
 };
 
 export async function* streamChatFetch(message: string, sessionId: string | null) {

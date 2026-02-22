@@ -157,12 +157,12 @@ export const ExplorePage: React.FC = () => {
         isLoading={isModalLoading}
       />
 
-      {/* AI Fund Finder Modal */}
+      {/* AI Fund Finder Modal - Keep open when viewing fund details */}
       <AnimatePresence>
         {showAIFinder && (
           <AIFundFinder
             onFundSelect={(fund) => {
-              setShowAIFinder(false);
+              // Don't close AI Finder - just open fund detail on top
               handleFundClick(fund);
             }}
             onClose={() => setShowAIFinder(false)}
