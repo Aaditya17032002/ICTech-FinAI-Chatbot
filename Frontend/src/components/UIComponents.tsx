@@ -6,6 +6,7 @@ import {
   Percent, TrendingUp, Calendar, ChevronRight, TrendingDown, Activity
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ChatMessageData, InvestmentResponse, DataPoint, Source, Fund, FundDetail } from "../types";
 import { cn } from "../cn";
 
@@ -227,11 +228,67 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
 
           <div className="prose prose-zinc dark:prose-invert max-w-none text-zinc-800 dark:text-zinc-200 leading-relaxed text-lg font-medium">
             {typeof content === "string" ? (
-              <ReactMarkdown>{content}</ReactMarkdown>
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto my-4 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                      <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-700">
+                        {children}
+                      </table>
+                    </div>
+                  ),
+                  thead: ({ children }) => (
+                    <thead className="bg-zinc-100 dark:bg-zinc-800">{children}</thead>
+                  ),
+                  tbody: ({ children }) => (
+                    <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700 bg-white dark:bg-zinc-900">{children}</tbody>
+                  ),
+                  tr: ({ children }) => (
+                    <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">{children}</tr>
+                  ),
+                  th: ({ children }) => (
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap">{children}</th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{children}</td>
+                  ),
+                }}
+              >
+                {content}
+              </ReactMarkdown>
             ) : (
               <>
                 <div className="mb-6">
-                  <ReactMarkdown>{content.explanation}</ReactMarkdown>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      table: ({ children }) => (
+                        <div className="overflow-x-auto my-4 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                          <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-700">
+                            {children}
+                          </table>
+                        </div>
+                      ),
+                      thead: ({ children }) => (
+                        <thead className="bg-zinc-100 dark:bg-zinc-800">{children}</thead>
+                      ),
+                      tbody: ({ children }) => (
+                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700 bg-white dark:bg-zinc-900">{children}</tbody>
+                      ),
+                      tr: ({ children }) => (
+                        <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">{children}</tr>
+                      ),
+                      th: ({ children }) => (
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap">{children}</th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{children}</td>
+                      ),
+                    }}
+                  >
+                    {content.explanation}
+                  </ReactMarkdown>
                 </div>
                 <DataPointsCard dataPoints={content.data_points} />
                 <SourcesList sources={content.sources} />
