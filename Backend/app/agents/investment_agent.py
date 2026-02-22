@@ -157,7 +157,7 @@ def extract_categories(query: str) -> list[str]:
     return [cat for cat, kws in categories.items() if any(kw in query_lower for kw in kws)]
 
 
-async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None) -> dict[str, Any]:
+async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None) -> tuple[dict[str, Any], QueryAnalysis]:
     """
     Multi-step data fetching based on LLM query analysis.
     Uses dynamic entity extraction to find any fund, not just from a static list.
@@ -165,6 +165,9 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
     Args:
         query: User's question
         date_range: Optional parsed date range from the query
+    
+    Returns:
+        Tuple of (data dict, QueryAnalysis)
     """
     data = {
         "funds": [],
@@ -179,7 +182,12 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
     
     # Use LLM to analyze the query and extract entities
     analysis = await analyze_query(query)
-    logger.info(f"[DATA FETCH] LLM Analysis: funds={analysis.fund_names}, categories={analysis.fund_categories}, stocks={analysis.stock_symbols}, intent={analysis.intent}")
+    logger.info(f"[DATA FETCH] LLM Analysis: funds={analysis.fund_names}, categories={analysis.fund_categories}, stocks={analysis.stock_symbols}, intent={analysis.intent}, is_finance={analysis.is_finance_related}")
+    
+    # Return early for off-topic queries
+    if not analysis.is_finance_related or analysis.intent == "off_topic":
+        logger.info("[DATA FETCH] Off-topic query detected, skipping data fetch")
+        return data, analysis
     
     if date_range:
         logger.info(f"[DATA FETCH] Date range requested: {date_range.period_label}")
@@ -259,7 +267,7 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
                 logger.error(f"Error fetching stock '{stock}': {e}")
     
     logger.info(f"[DATA FETCH] Completed: {len(data['funds'])} funds, {len(data['stocks'])} stocks, {len(data['categories'])} categories")
-    return data
+    return data, analysis
 
 
 def format_data_for_prompt(data: dict[str, Any], date_range: Optional[DateRange] = None) -> str:
@@ -450,7 +458,18 @@ async def run_agent(
         logger.info(f"[AGENT] Detected date range: {date_range.period_label}")
     
     logger.info(f"[AGENT] Step 1: Fetching relevant data...")
-    fetched_data = await fetch_relevant_data(user_message, date_range)
+    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range)
+    
+    # Handle off-topic queries
+    if not query_analysis.is_finance_related or query_analysis.intent == "off_topic":
+        logger.info("[AGENT] Off-topic query detected, returning rejection message")
+        elapsed = time.time() - start_time
+        return InvestmentResponse(
+            message=query_analysis.rejection_message or "I'm a financial advisor assistant specialized in Indian mutual funds and stocks. I can help you with investment queries, fund comparisons, market analysis, and portfolio recommendations. Please ask me something related to investments or finance!",
+            data_points=[],
+            sources=[],
+            disclaimer="",
+        )
     
     if user_profile:
         for category in user_profile.get_recommended_categories()[:2]:
@@ -579,7 +598,17 @@ async def run_agent_stream(
         logger.info(f"[AGENT STREAM] Detected date range: {date_range.period_label}")
     
     logger.info(f"[AGENT STREAM] Step 1: Fetching relevant data...")
-    fetched_data = await fetch_relevant_data(user_message, date_range)
+    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range)
+    
+    # Handle off-topic queries
+    if not query_analysis.is_finance_related or query_analysis.intent == "off_topic":
+        logger.info("[AGENT STREAM] Off-topic query detected")
+        yield {
+            "type": "message",
+            "content": query_analysis.rejection_message or "I'm a financial advisor assistant specialized in Indian mutual funds and stocks. I can help you with investment queries, fund comparisons, market analysis, and portfolio recommendations. Please ask me something related to investments or finance!"
+        }
+        yield {"type": "complete", "data_points": [], "sources": []}
+        return
     
     query_type = classify_query(user_message)
     selected_agent = reasoning_agent if query_type == "reasoning" else fast_agent

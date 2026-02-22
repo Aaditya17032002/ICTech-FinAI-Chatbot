@@ -20,19 +20,25 @@ class QueryAnalysis:
     fund_names: list[str] = field(default_factory=list)
     fund_categories: list[str] = field(default_factory=list)
     stock_symbols: list[str] = field(default_factory=list)
-    intent: str = "general"  # info, compare, recommend, analyze
+    intent: str = "general"  # info, compare, recommend, analyze, off_topic
     needs_market_data: bool = False
     search_terms: list[str] = field(default_factory=list)
+    is_finance_related: bool = True
+    rejection_message: str = ""
 
 
 QUERY_ANALYSIS_TOOL = {
     "type": "function",
     "function": {
         "name": "analyze_investment_query",
-        "description": "Extract investment entities and intent from a user query",
+        "description": "Extract investment entities and intent from a user query about Indian mutual funds, stocks, or financial markets",
         "parameters": {
             "type": "object",
             "properties": {
+                "is_finance_related": {
+                    "type": "boolean",
+                    "description": "True if the query is about investments, mutual funds, stocks, markets, finance, money, or financial planning. False for completely unrelated topics like weather, sports, cooking, entertainment, etc."
+                },
                 "fund_names": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -41,7 +47,7 @@ QUERY_ANALYSIS_TOOL = {
                 "fund_categories": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Fund categories mentioned (e.g., 'large cap', 'mid cap', 'small cap', 'index', 'ELSS', 'debt', 'hybrid', 'flexi cap')"
+                    "description": "Fund categories mentioned. Map aliases: 'blue chip'/'bluechip' → 'large cap'. Categories: 'large cap', 'mid cap', 'small cap', 'index', 'ELSS', 'debt', 'hybrid', 'flexi cap', 'multi cap'"
                 },
                 "stock_symbols": {
                     "type": "array",
@@ -50,8 +56,8 @@ QUERY_ANALYSIS_TOOL = {
                 },
                 "intent": {
                     "type": "string",
-                    "enum": ["info", "compare", "recommend", "analyze", "general"],
-                    "description": "User's intent: 'info' for specific fund info, 'compare' for comparisons, 'recommend' for suggestions, 'analyze' for deep analysis, 'general' for other"
+                    "enum": ["info", "compare", "recommend", "analyze", "general", "off_topic"],
+                    "description": "User's intent: 'info' for specific fund info, 'compare' for comparisons, 'recommend' for suggestions/best/top, 'analyze' for deep analysis, 'general' for finance questions, 'off_topic' for non-finance queries"
                 },
                 "needs_market_data": {
                     "type": "boolean",
@@ -63,7 +69,7 @@ QUERY_ANALYSIS_TOOL = {
                     "description": "Key search terms to use for finding relevant funds if specific names aren't clear"
                 }
             },
-            "required": ["fund_names", "fund_categories", "intent"]
+            "required": ["is_finance_related", "fund_names", "fund_categories", "intent"]
         }
     }
 }
@@ -88,20 +94,37 @@ async def analyze_query_llm(query: str) -> QueryAnalysis:
         
         system_prompt = """You are an expert at analyzing investment queries for Indian mutual funds and stocks.
 
+FIRST: Determine if the query is finance-related. Finance topics include:
+- Mutual funds, stocks, shares, investments
+- Markets (NIFTY, SENSEX, BSE, NSE)
+- Financial planning, SIP, returns, NAV
+- Fund categories, portfolios, wealth management
+
+NOT finance-related: weather, sports, cooking, movies, general knowledge, politics (unless about economic policy), etc.
+
 Your job is to extract:
-1. **Fund Names**: Any mutual fund names mentioned. Be generous - if someone says "Nippon mid cap" or "nippon india mid cap fund", extract it as a search term.
-2. **Categories**: Fund categories like large cap, mid cap, small cap, ELSS, index, debt, hybrid, flexi cap
-3. **Stocks**: Any stock names or symbols (Reliance, TCS, Infosys, etc.)
-4. **Intent**: What does the user want to know?
+1. **is_finance_related**: True for investment/finance queries, False for unrelated topics
+2. **Fund Names**: Any mutual fund names mentioned
+3. **Categories**: Map these aliases:
+   - "blue chip" / "bluechip" → "large cap"
+   - "growth fund" → could be any category, use search_terms
+   - Categories: large cap, mid cap, small cap, index, ELSS, debt, hybrid, flexi cap, multi cap
+4. **Stocks**: Any stock names or symbols
+5. **Intent**: recommend (for best/top/list), compare, analyze, info, general, off_topic
 
 Examples:
-- "Is Nippon India Mid Cap Fund worth investing?" → fund_names: ["Nippon India Mid Cap"], intent: "analyze"
-- "Compare SBI Bluechip vs HDFC Top 100" → fund_names: ["SBI Bluechip", "HDFC Top 100"], intent: "compare"
-- "Best large cap funds" → fund_categories: ["large cap"], intent: "recommend"
-- "How is Reliance stock doing?" → stock_symbols: ["Reliance"], intent: "info"
-- "Top performing mid cap funds last year" → fund_categories: ["mid cap"], intent: "recommend"
+- "List me blue chip funds" → is_finance_related: true, fund_categories: ["large cap"], intent: "recommend"
+- "Best bluechip funds to invest" → is_finance_related: true, fund_categories: ["large cap"], intent: "recommend"
+- "Is Nippon India Mid Cap Fund worth investing?" → is_finance_related: true, fund_names: ["Nippon India Mid Cap"], intent: "analyze"
+- "Compare SBI Bluechip vs HDFC Top 100" → is_finance_related: true, fund_names: ["SBI Bluechip", "HDFC Top 100"], intent: "compare"
+- "What's the weather today?" → is_finance_related: false, intent: "off_topic"
+- "Tell me a joke" → is_finance_related: false, intent: "off_topic"
+- "Top performing mid cap funds" → is_finance_related: true, fund_categories: ["mid cap"], intent: "recommend"
 
-IMPORTANT: Always extract fund names even if partially mentioned. "Nippon mid cap" should become "Nippon India Mid Cap" or at least "Nippon Mid Cap" as a search term."""
+IMPORTANT: 
+- "blue chip" ALWAYS maps to "large cap" category
+- For "list", "show", "best", "top" queries, use intent: "recommend"
+- Be generous with fund name extraction"""
 
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -121,13 +144,23 @@ IMPORTANT: Always extract fund names even if partially mentioned. "Nippon mid ca
             
             logger.info(f"[QUERY ANALYZER] Extracted: {args}")
             
+            is_finance = args.get("is_finance_related", True)
+            intent = args.get("intent", "general")
+            
+            # Generate rejection message for off-topic queries
+            rejection_msg = ""
+            if not is_finance or intent == "off_topic":
+                rejection_msg = "I'm a financial advisor assistant specialized in Indian mutual funds and stocks. I can help you with investment queries, fund comparisons, market analysis, and portfolio recommendations. Please ask me something related to investments or finance!"
+            
             return QueryAnalysis(
                 fund_names=args.get("fund_names", []),
                 fund_categories=args.get("fund_categories", []),
                 stock_symbols=args.get("stock_symbols", []),
-                intent=args.get("intent", "general"),
+                intent=intent,
                 needs_market_data=args.get("needs_market_data", False),
-                search_terms=args.get("search_terms", [])
+                search_terms=args.get("search_terms", []),
+                is_finance_related=is_finance,
+                rejection_message=rejection_msg,
             )
         
         return QueryAnalysis()
@@ -145,14 +178,27 @@ def analyze_query_regex(query: str) -> QueryAnalysis:
     
     result = QueryAnalysis()
     
+    # Check if finance-related
+    finance_keywords = [
+        "fund", "invest", "stock", "share", "market", "nifty", "sensex",
+        "sip", "nav", "return", "portfolio", "mutual", "equity", "debt",
+        "cap", "elss", "tax", "wealth", "money", "finance", "trading"
+    ]
+    result.is_finance_related = any(kw in query_lower for kw in finance_keywords)
+    
+    if not result.is_finance_related:
+        result.intent = "off_topic"
+        result.rejection_message = "I'm a financial advisor assistant specialized in Indian mutual funds and stocks. I can help you with investment queries, fund comparisons, market analysis, and portfolio recommendations. Please ask me something related to investments or finance!"
+        return result
+    
     # Extract categories
     category_keywords = {
-        "large cap": ["large cap", "largecap", "large-cap", "bluechip", "blue chip"],
+        "large cap": ["large cap", "largecap", "large-cap", "bluechip", "blue chip", "blue-chip"],
         "mid cap": ["mid cap", "midcap", "mid-cap"],
         "small cap": ["small cap", "smallcap", "small-cap"],
         "index": ["index fund", "nifty 50 fund", "sensex fund"],
         "elss": ["elss", "tax saving", "tax saver"],
-        "debt": ["debt", "bond", "liquid", "money market"],
+        "debt": ["debt fund", "bond fund", "liquid fund", "money market"],
         "hybrid": ["hybrid", "balanced", "aggressive hybrid"],
         "flexi cap": ["flexi cap", "flexicap", "multi cap", "multicap"],
     }
