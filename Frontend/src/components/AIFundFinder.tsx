@@ -55,6 +55,35 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
   const [aiInsight, setAiInsight] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const generateInsight = (category: string): string => {
+    const goalLabels: Record<string, string> = {
+      wealth: "wealth creation",
+      retirement: "retirement planning",
+      tax_saving: "tax saving under Section 80C",
+      house: "saving for a house",
+      education: "education planning",
+      travel: "travel goals",
+    };
+    
+    const riskDescriptions: Record<string, string> = {
+      conservative: "prioritize capital preservation with steady returns",
+      moderate: "balance growth potential with manageable risk",
+      aggressive: "maximize growth potential despite higher volatility",
+    };
+    
+    const horizonTips: Record<string, string> = {
+      short_term: "Consider staying liquid for flexibility",
+      medium_term: "A mix of equity and debt can optimize returns",
+      long_term: "Equity funds can help beat inflation over time",
+    };
+
+    const goal = goalLabels[preferences.goal] || preferences.goal;
+    const riskDesc = riskDescriptions[preferences.riskTolerance];
+    const horizonTip = horizonTips[preferences.investmentHorizon];
+
+    return `For ${goal}, ${category} funds are ideal as they ${riskDesc}. ${horizonTip}. With ₹${preferences.monthlyAmount.toLocaleString()}/month SIP, you can build a strong portfolio over time.`;
+  };
+
   const getRecommendations = async () => {
     setStep("loading");
     setIsLoading(true);
@@ -67,57 +96,45 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
       // Map goal to category
       if (preferences.goal === "tax_saving") {
         category = "ELSS";
-        query = "ELSS tax saving";
+        query = "ELSS tax saving direct growth";
       } else if (preferences.riskTolerance === "conservative") {
         if (preferences.investmentHorizon === "short_term") {
-          category = "debt";
-          query = "liquid debt fund";
+          category = "Debt/Liquid";
+          query = "liquid fund direct";
         } else {
-          category = "large cap";
-          query = "large cap bluechip";
+          category = "Large Cap";
+          query = "large cap direct growth";
         }
       } else if (preferences.riskTolerance === "aggressive") {
         if (preferences.investmentHorizon === "long_term") {
-          category = "small cap";
-          query = "small cap growth";
+          category = "Small Cap";
+          query = "small cap direct growth";
         } else {
-          category = "mid cap";
-          query = "mid cap";
+          category = "Mid Cap";
+          query = "mid cap direct growth";
         }
       } else {
         // Moderate
         if (preferences.investmentHorizon === "long_term") {
-          category = "flexi cap";
-          query = "flexi cap multi cap";
+          category = "Flexi Cap";
+          query = "flexi cap direct growth";
         } else {
-          category = "large cap";
-          query = "large cap";
+          category = "Large & Mid Cap";
+          query = "large mid cap direct growth";
         }
       }
 
-      // Get fund recommendations
+      // Get fund recommendations (only API call needed)
       const searchResult = await api.searchFunds(query, 6);
       setRecommendations(searchResult.results || []);
 
-      // Get AI insight using chat API
-      const insightQuery = `Based on a ${preferences.riskTolerance} risk tolerance, ${preferences.investmentHorizon.replace("_", " ")} investment horizon, and goal of ${preferences.goal.replace("_", " ")}, with monthly SIP of ₹${preferences.monthlyAmount}, give a 2-3 sentence recommendation summary for ${category} funds. Be concise and actionable.`;
-      
-      try {
-        const chatResponse = await api.chat(insightQuery, null);
-        if (chatResponse.response?.explanation) {
-          // Extract first 2-3 sentences
-          const sentences = chatResponse.response.explanation.split(/[.!?]+/).filter(s => s.trim()).slice(0, 3);
-          setAiInsight(sentences.join(". ") + ".");
-        }
-      } catch (e) {
-        // Fallback insight
-        setAiInsight(`Based on your ${preferences.riskTolerance} risk profile and ${preferences.investmentHorizon.replace("_", " ")} horizon, ${category} funds are well-suited for your ${preferences.goal.replace("_", " ")} goal.`);
-      }
+      // Generate insight instantly (no API call)
+      setAiInsight(generateInsight(category));
 
       setStep("results");
     } catch (err) {
       console.error("Failed to get recommendations", err);
-      setAiInsight("We found some funds that might interest you based on your preferences.");
+      setAiInsight("We found some funds based on your preferences. Click on any fund to view details.");
       setStep("results");
     } finally {
       setIsLoading(false);
@@ -426,7 +443,7 @@ export const AIFundFinder: React.FC<AIFundFinderProps> = ({ onFundSelect, onClos
                   Finding your perfect funds...
                 </h3>
                 <p className="text-zinc-500 dark:text-zinc-400">
-                  Our AI is analyzing thousands of funds
+                  Matching funds to your profile
                 </p>
               </motion.div>
             )}
