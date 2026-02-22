@@ -75,9 +75,9 @@ QUERY_ANALYSIS_TOOL = {
 }
 
 
-async def analyze_query_llm(query: str) -> QueryAnalysis:
+async def analyze_query_llm(query: str, conversation_history: list[dict] = None) -> QueryAnalysis:
     """
-    Use LLM to intelligently analyze an investment query.
+    Use LLM to intelligently analyze an investment query with conversation context.
     
     Extracts:
     - Specific fund names (any fund, not just from a static list)
@@ -86,11 +86,26 @@ async def analyze_query_llm(query: str) -> QueryAnalysis:
     - User intent
     - Whether market data is needed
     
+    Args:
+        query: The current user query
+        conversation_history: Previous messages for context resolution
+    
     Returns:
         QueryAnalysis object with extracted entities
     """
     try:
         client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        
+        # Build context from conversation history
+        context_str = ""
+        if conversation_history and len(conversation_history) > 0:
+            recent = conversation_history[-6:]  # Last 3 exchanges
+            context_parts = []
+            for msg in recent:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')[:300]
+                context_parts.append(f"{role}: {content}")
+            context_str = "\n".join(context_parts)
         
         system_prompt = """You are an expert at analyzing investment queries for Indian mutual funds and stocks.
 
@@ -104,7 +119,7 @@ NOT finance-related: weather, sports, cooking, movies, general knowledge, politi
 
 Your job is to extract:
 1. **is_finance_related**: True for investment/finance queries, False for unrelated topics
-2. **Fund Names**: Any mutual fund names mentioned
+2. **Fund Names**: Any mutual fund names mentioned OR referenced from conversation context
 3. **Categories**: Map these aliases:
    - "blue chip" / "bluechip" → "large cap"
    - "growth fund" → could be any category, use search_terms
@@ -112,25 +127,35 @@ Your job is to extract:
 4. **Stocks**: Any stock names or symbols
 5. **Intent**: recommend (for best/top/list), compare, analyze, info, general, off_topic
 
+IMPORTANT - CONTEXT RESOLUTION:
+- If user says "that fund", "this fund", "the fund", "it", "more about it", etc., look at the conversation history to find what fund/stock they're referring to
+- Extract the actual fund/stock name from context, not the pronoun
+- Example: If previous message was about "Nippon India Mid Cap" and user asks "tell me more about it", extract fund_names: ["Nippon India Mid Cap"]
+
 Examples:
-- "List me blue chip funds" → is_finance_related: true, fund_categories: ["large cap"], intent: "recommend"
-- "Best bluechip funds to invest" → is_finance_related: true, fund_categories: ["large cap"], intent: "recommend"
-- "Is Nippon India Mid Cap Fund worth investing?" → is_finance_related: true, fund_names: ["Nippon India Mid Cap"], intent: "analyze"
-- "Compare SBI Bluechip vs HDFC Top 100" → is_finance_related: true, fund_names: ["SBI Bluechip", "HDFC Top 100"], intent: "compare"
-- "What's the weather today?" → is_finance_related: false, intent: "off_topic"
-- "Tell me a joke" → is_finance_related: false, intent: "off_topic"
-- "Top performing mid cap funds" → is_finance_related: true, fund_categories: ["mid cap"], intent: "recommend"
+- "List me blue chip funds" → fund_categories: ["large cap"], intent: "recommend"
+- "Is Nippon India Mid Cap Fund worth investing?" → fund_names: ["Nippon India Mid Cap"], intent: "analyze"
+- "Tell me more about that fund" (context: Nippon India) → fund_names: ["Nippon India Mid Cap"], intent: "info"
+- "What is its NAV?" (context: SBI Bluechip) → fund_names: ["SBI Bluechip"], intent: "info"
+- "Compare it with HDFC Top 100" (context: Axis Bluechip) → fund_names: ["Axis Bluechip", "HDFC Top 100"], intent: "compare"
 
 IMPORTANT: 
 - "blue chip" ALWAYS maps to "large cap" category
 - For "list", "show", "best", "top" queries, use intent: "recommend"
-- Be generous with fund name extraction"""
+- Be generous with fund name extraction
+- ALWAYS resolve pronouns using conversation context"""
+
+        # Build the user message with context
+        user_message = f"Analyze this investment query: \"{query}\""
+        if context_str:
+            user_message = f"Previous conversation:\n{context_str}\n\nCurrent query to analyze: \"{query}\""
+            logger.info(f"[QUERY ANALYZER] Using conversation context for query resolution")
 
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Analyze this investment query: \"{query}\""}
+                {"role": "user", "content": user_message}
             ],
             tools=[QUERY_ANALYSIS_TOOL],
             tool_choice={"type": "function", "function": {"name": "analyze_investment_query"}},
@@ -244,8 +269,12 @@ def analyze_query_regex(query: str) -> QueryAnalysis:
     return result
 
 
-async def analyze_query(query: str) -> QueryAnalysis:
+async def analyze_query(query: str, conversation_history: list[dict] = None) -> QueryAnalysis:
     """
-    Analyze query - tries LLM first, falls back to regex.
+    Analyze query with conversation context - tries LLM first, falls back to regex.
+    
+    Args:
+        query: The current user query
+        conversation_history: Previous messages for context resolution (e.g., "that fund" → actual fund name)
     """
-    return await analyze_query_llm(query)
+    return await analyze_query_llm(query, conversation_history)

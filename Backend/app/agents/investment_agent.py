@@ -157,7 +157,7 @@ def extract_categories(query: str) -> list[str]:
     return [cat for cat, kws in categories.items() if any(kw in query_lower for kw in kws)]
 
 
-async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None) -> tuple[dict[str, Any], QueryAnalysis]:
+async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None, conversation_history: list[dict] = None) -> tuple[dict[str, Any], QueryAnalysis]:
     """
     Multi-step data fetching based on LLM query analysis.
     Uses dynamic entity extraction to find any fund, not just from a static list.
@@ -165,6 +165,7 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
     Args:
         query: User's question
         date_range: Optional parsed date range from the query
+        conversation_history: Previous messages for context resolution
     
     Returns:
         Tuple of (data dict, QueryAnalysis)
@@ -180,8 +181,8 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
     
     logger.info(f"[DATA FETCH] Analyzing query with LLM: {query[:100]}...")
     
-    # Use LLM to analyze the query and extract entities
-    analysis = await analyze_query(query)
+    # Use LLM to analyze the query and extract entities (with conversation context for pronoun resolution)
+    analysis = await analyze_query(query, conversation_history)
     logger.info(f"[DATA FETCH] LLM Analysis: funds={analysis.fund_names}, categories={analysis.fund_categories}, stocks={analysis.stock_symbols}, intent={analysis.intent}, is_finance={analysis.is_finance_related}")
     
     # Return early for off-topic queries
@@ -458,7 +459,7 @@ async def run_agent(
         logger.info(f"[AGENT] Detected date range: {date_range.period_label}")
     
     logger.info(f"[AGENT] Step 1: Fetching relevant data...")
-    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range)
+    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range, conversation_history)
     
     # Handle off-topic queries
     if not query_analysis.is_finance_related or query_analysis.intent == "off_topic":
@@ -609,7 +610,7 @@ async def run_agent_stream(
         logger.info(f"[AGENT STREAM] Detected date range: {date_range.period_label}")
     
     logger.info(f"[AGENT STREAM] Step 1: Fetching relevant data...")
-    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range)
+    fetched_data, query_analysis = await fetch_relevant_data(user_message, date_range, conversation_history)
     
     # Handle off-topic queries
     if not query_analysis.is_finance_related or query_analysis.intent == "off_topic":
