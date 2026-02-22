@@ -100,11 +100,29 @@ export const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
+    try {
+      // Clear server-side cache
+      await api.resetApplication();
+      console.log("[ChatPage] Server cache cleared");
+    } catch (err) {
+      console.error("[ChatPage] Failed to clear server cache:", err);
+    }
+    
+    // Clear client-side state
     setMessages([]);
     setSessionId(null);
+    setError(null);
+    
+    // Clear all localStorage
     localStorage.removeItem("chat_history");
     localStorage.removeItem("session_id");
+    localStorage.removeItem("user_profile");
+    
+    // Generate new session ID for fresh start
+    const newSessionId = uuidv4();
+    setSessionId(newSessionId);
+    localStorage.setItem("session_id", newSessionId);
   };
 
   const handleSend = async (text: string, forceStatic: boolean = false) => {

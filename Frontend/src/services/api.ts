@@ -125,6 +125,14 @@ export const api = {
     if (!response.ok) throw new Error("Failed to fetch market overview");
     return response.json();
   },
+
+  async resetApplication(): Promise<{ status: string; message: string; timestamp: string }> {
+    const response = await fetch(`${BASE_URL}/reset`, {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error("Failed to reset application");
+    return response.json();
+  },
 };
 
 export async function* streamChatFetch(message: string, sessionId: string | null) {
