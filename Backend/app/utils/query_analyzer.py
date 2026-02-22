@@ -31,7 +31,7 @@ QUERY_ANALYSIS_TOOL = {
     "type": "function",
     "function": {
         "name": "analyze_investment_query",
-        "description": "Extract investment entities and intent from a user query about Indian mutual funds, stocks, or financial markets",
+        "description": "Extract investment entities and intent from a user query about Indian mutual funds, stocks, or financial markets. Correct any typos or partial names to proper fund names.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,12 +42,12 @@ QUERY_ANALYSIS_TOOL = {
                 "fund_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Specific mutual fund names mentioned (e.g., 'Nippon India Mid Cap Fund', 'SBI Bluechip', 'HDFC Top 100'). Extract the full fund name as the user mentioned it."
+                    "description": "Specific mutual fund names mentioned. CORRECT any typos or partial names to the proper fund name. Examples: 'nipon india vision' → 'Nippon India Vision Fund', 'sbi blue chip' → 'SBI Blue Chip Fund', 'hdfc top 100' → 'HDFC Top 100 Fund'. Always include 'Fund' suffix if it's a mutual fund."
                 },
                 "fund_categories": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Fund categories mentioned. Map aliases: 'blue chip'/'bluechip' → 'large cap'. Categories: 'large cap', 'mid cap', 'small cap', 'index', 'ELSS', 'debt', 'hybrid', 'flexi cap', 'multi cap'"
+                    "description": "Fund categories mentioned. Map aliases: 'blue chip'/'bluechip' → 'large cap'. Categories: 'large cap', 'mid cap', 'small cap', 'index', 'ELSS', 'debt', 'hybrid', 'flexi cap', 'multi cap', 'large & mid cap'"
                 },
                 "stock_symbols": {
                     "type": "array",
@@ -57,7 +57,7 @@ QUERY_ANALYSIS_TOOL = {
                 "intent": {
                     "type": "string",
                     "enum": ["info", "compare", "recommend", "analyze", "general", "off_topic"],
-                    "description": "User's intent: 'info' for specific fund info, 'compare' for comparisons, 'recommend' for suggestions/best/top, 'analyze' for deep analysis, 'general' for finance questions, 'off_topic' for non-finance queries"
+                    "description": "User's intent: 'info' for specific fund info, 'compare' for comparisons, 'recommend' for suggestions/best/top, 'analyze' for investment worthiness analysis, 'general' for finance questions, 'off_topic' for non-finance queries"
                 },
                 "needs_market_data": {
                     "type": "boolean",
@@ -66,10 +66,10 @@ QUERY_ANALYSIS_TOOL = {
                 "search_terms": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Key search terms to use for finding relevant funds if specific names aren't clear"
+                    "description": "Multiple search variations to find the fund. Include: exact name, partial name, fund house + category. Example for 'Nippon India Vision Fund': ['Nippon India Vision', 'Nippon Vision Fund', 'Nippon India Large Mid Cap']"
                 }
             },
-            "required": ["is_finance_related", "fund_names", "fund_categories", "intent"]
+            "required": ["is_finance_related", "fund_names", "fund_categories", "intent", "search_terms"]
         }
     }
 }
@@ -117,33 +117,42 @@ FIRST: Determine if the query is finance-related. Finance topics include:
 
 NOT finance-related: weather, sports, cooking, movies, general knowledge, politics (unless about economic policy), etc.
 
-Your job is to extract:
+Your job is to extract AND CORRECT:
 1. **is_finance_related**: True for investment/finance queries, False for unrelated topics
-2. **Fund Names**: Any mutual fund names mentioned OR referenced from conversation context
-3. **Categories**: Map these aliases:
-   - "blue chip" / "bluechip" → "large cap"
-   - "growth fund" → could be any category, use search_terms
-   - Categories: large cap, mid cap, small cap, index, ELSS, debt, hybrid, flexi cap, multi cap
-4. **Stocks**: Any stock names or symbols
-5. **Intent**: recommend (for best/top/list), compare, analyze, info, general, off_topic
+2. **Fund Names**: CORRECT any typos or partial names to proper fund names:
+   - "nipon india vision" → "Nippon India Vision Fund"
+   - "sbi blue chip" → "SBI Blue Chip Fund"  
+   - "hdfc top 100" → "HDFC Top 100 Fund"
+   - "axis midcap" → "Axis Midcap Fund"
+   - Always capitalize properly and add "Fund" suffix
+3. **Categories**: Infer category from fund name if possible:
+   - "Vision Fund" is typically "Large & Mid Cap"
+   - "Blue Chip" / "Top 100" → "large cap"
+   - "Midcap" / "Mid Cap" → "mid cap"
+   - "Small Cap" → "small cap"
+4. **search_terms**: Provide MULTIPLE search variations:
+   - For "Nippon India Vision Fund": ["Nippon India Vision", "Nippon Vision", "Nippon Large Mid"]
+   - Include fund house name, fund type, and variations
+5. **Intent**: 
+   - "worth investing" / "should I invest" / "good fund" → "analyze"
+   - "best" / "top" / "recommend" → "recommend"
+   - "compare" / "vs" → "compare"
+   - "NAV" / "returns" / "tell me about" → "info"
 
 IMPORTANT - CONTEXT RESOLUTION:
-- If user says "that fund", "this fund", "the fund", "it", "more about it", etc., look at the conversation history to find what fund/stock they're referring to
+- If user says "that fund", "this fund", "it", etc., look at conversation history
 - Extract the actual fund/stock name from context, not the pronoun
-- Example: If previous message was about "Nippon India Mid Cap" and user asks "tell me more about it", extract fund_names: ["Nippon India Mid Cap"]
 
-Examples:
-- "List me blue chip funds" → fund_categories: ["large cap"], intent: "recommend"
-- "Is Nippon India Mid Cap Fund worth investing?" → fund_names: ["Nippon India Mid Cap"], intent: "analyze"
-- "Tell me more about that fund" (context: Nippon India) → fund_names: ["Nippon India Mid Cap"], intent: "info"
-- "What is its NAV?" (context: SBI Bluechip) → fund_names: ["SBI Bluechip"], intent: "info"
-- "Compare it with HDFC Top 100" (context: Axis Bluechip) → fund_names: ["Axis Bluechip", "HDFC Top 100"], intent: "compare"
+COMMON INDIAN FUND HOUSES:
+- Nippon India (formerly Reliance)
+- SBI, HDFC, ICICI Prudential, Axis, Kotak
+- Aditya Birla Sun Life, DSP, UTI, Tata
+- Mirae Asset, Parag Parikh, Quant
 
 IMPORTANT: 
 - "blue chip" ALWAYS maps to "large cap" category
-- For "list", "show", "best", "top" queries, use intent: "recommend"
-- Be generous with fund name extraction
-- ALWAYS resolve pronouns using conversation context"""
+- "worth investing?" means intent: "analyze" (user wants investment advice)
+- ALWAYS provide multiple search_terms for better fund matching"""
 
         # Build the user message with context
         user_message = f"Analyze this investment query: \"{query}\""

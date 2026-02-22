@@ -274,32 +274,38 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
         logger.info(f"[DATA FETCH] Date range requested: {date_range.period_label}")
     
     # Fetch specific funds mentioned by name
-    if analysis.fund_names:
-        logger.info(f"[DATA FETCH] Searching for funds: {analysis.fund_names}")
-        for fund_name in analysis.fund_names[:3]:
-            try:
-                results = research_mutual_fund(fund_name)
-                if results:
-                    data["funds"].extend(results[:3])
-                    logger.info(f"[DATA FETCH] Found {len(results)} results for '{fund_name}'")
-                else:
-                    logger.warning(f"[DATA FETCH] No results for '{fund_name}'")
-            except Exception as e:
-                logger.error(f"Error fetching fund '{fund_name}': {e}")
+    # First try fund_names, then search_terms for better matching
+    all_search_queries = []
     
-    # Also search using search terms if provided
+    if analysis.fund_names:
+        all_search_queries.extend(analysis.fund_names[:3])
+    
     if analysis.search_terms:
-        for term in analysis.search_terms[:2]:
-            if term not in [f.lower() for f in analysis.fund_names]:
-                try:
-                    results = research_mutual_fund(term)
-                    if results:
-                        # Avoid duplicates
-                        existing_codes = {f.scheme_code for f in data["funds"]}
-                        new_funds = [f for f in results if f.scheme_code not in existing_codes]
-                        data["funds"].extend(new_funds[:2])
-                except Exception as e:
-                    logger.error(f"Error fetching search term '{term}': {e}")
+        # Add search terms that aren't already in the list
+        for term in analysis.search_terms[:5]:
+            if term.lower() not in [q.lower() for q in all_search_queries]:
+                all_search_queries.append(term)
+    
+    if all_search_queries:
+        logger.info(f"[DATA FETCH] Searching with queries: {all_search_queries}")
+        found_codes = set()
+        
+        for search_query in all_search_queries:
+            if len(data["funds"]) >= 5:  # Limit total funds
+                break
+            try:
+                results = research_mutual_fund(search_query)
+                if results:
+                    # Add only new funds (avoid duplicates)
+                    for fund in results[:3]:
+                        if fund.scheme_code not in found_codes:
+                            found_codes.add(fund.scheme_code)
+                            data["funds"].append(fund)
+                            logger.info(f"[DATA FETCH] Found: {fund.scheme_name}")
+                else:
+                    logger.warning(f"[DATA FETCH] No results for '{search_query}'")
+            except Exception as e:
+                logger.error(f"Error fetching fund '{search_query}': {e}")
     
     # Fetch funds by category
     if analysis.fund_categories:
@@ -513,6 +519,63 @@ def create_sources_from_data(data: dict[str, Any]) -> list[Source]:
         ))
     
     return sources
+
+
+def _generate_fallback_explanation(query: str, data: dict[str, Any], error_msg: str = "") -> str:
+    """
+    Generate a helpful explanation from fetched data when the LLM fails.
+    This ensures users always get useful information even if the AI response fails.
+    """
+    sections = []
+    
+    # Check what data we have
+    funds = data.get("funds", [])
+    categories = data.get("categories", [])
+    stocks = data.get("stocks", [])
+    market = data.get("market")
+    
+    if not funds and not categories and not stocks:
+        return "I couldn't find specific data for your query. Please try asking about a specific mutual fund (e.g., 'SBI Bluechip Fund') or stock (e.g., 'Reliance Industries')."
+    
+    # Generate response based on available data
+    if funds:
+        sections.append("## Fund Information\n")
+        sections.append(f"Here's what I found for your query about **{query[:50]}**:\n")
+        
+        for fund in funds[:3]:
+            sections.append(f"### {fund.scheme_name}\n")
+            sections.append(f"- **NAV:** ₹{fund.nav} (as of {fund.nav_date or 'today'})")
+            sections.append(f"- **Category:** {fund.category or 'N/A'}")
+            sections.append(f"- **Fund House:** {fund.fund_house or 'N/A'}")
+            
+            if fund.returns:
+                returns_str = ", ".join([f"{k}: {v}" for k, v in list(fund.returns.items())[:3]])
+                sections.append(f"- **Returns:** {returns_str}")
+            sections.append("")
+    
+    if categories:
+        for cat_data in categories[:1]:
+            sections.append(f"\n## Top {cat_data['category'].title()} Funds\n")
+            for i, fund in enumerate(cat_data["funds"][:5], 1):
+                returns_str = ""
+                if fund.returns:
+                    one_y = fund.returns.get("1Y", fund.returns.get("1y", "N/A"))
+                    returns_str = f" | 1Y Return: {one_y}"
+                sections.append(f"{i}. **{fund.scheme_name}** - NAV: ₹{fund.nav}{returns_str}")
+    
+    if stocks:
+        sections.append("\n## Stock Information\n")
+        for stock in stocks[:3]:
+            sections.append(f"- **{stock.symbol}:** ₹{stock.current_price} ({stock.change_percent:+.2f}%)")
+    
+    # Add investment consideration
+    sections.append("\n## Key Considerations\n")
+    sections.append("- Review the fund's historical performance across different time periods")
+    sections.append("- Consider your investment horizon and risk tolerance")
+    sections.append("- Compare expense ratios and fund manager track record")
+    sections.append("- Diversify across multiple funds and asset classes")
+    
+    return "\n".join(sections)
 
 
 async def _handle_simple_query(
@@ -742,22 +805,15 @@ DATE PERIOD REQUIREMENTS:
         error_msg = str(e)
         logger.error(f"[AGENT] Error after {elapsed:.2f}s: {error_msg}", exc_info=True)
         
-        # Provide more helpful error message based on error type
-        user_message_text = "I apologize, but I encountered an error processing your request. Please try rephrasing your question or ask about a specific mutual fund or stock."
-        
-        if "rate limit" in error_msg.lower():
-            user_message_text = "I'm currently experiencing high demand. Please wait a moment and try again."
-        elif "timeout" in error_msg.lower():
-            user_message_text = "The request took too long to process. Please try a simpler question."
-        elif "validation" in error_msg.lower() or "pydantic" in error_msg.lower():
-            user_message_text = "I had trouble formatting my response. Let me try to help with the data I found."
+        # Generate a helpful response from the data we have
+        explanation = _generate_fallback_explanation(user_message, fetched_data, error_msg)
         
         return InvestmentResponse(
-            explanation=user_message_text,
+            explanation=explanation,
             data_points=create_data_points_from_data(fetched_data),
             sources=create_sources_from_data(fetched_data),
             risk_disclaimer=STANDARD_RISK_DISCLAIMER,
-            confidence_score=0.3,
+            confidence_score=0.6,
         )
 
 
