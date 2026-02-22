@@ -197,7 +197,9 @@ def classify_query(query: str) -> str:
         "cagr", "calculate", "return", "risk",
         "should i invest", "good time", "recommend",
         "analysis", "analyze", "evaluate", "which",
-        "top performing", "highest return"
+        "top performing", "highest return",
+        "worth investing", "worth it", "good investment",
+        "buy", "sell", "hold", "avoid"
     ]
     
     for keyword in reasoning_keywords:
@@ -798,31 +800,58 @@ async def run_agent(
             prompt_parts.append(f"\n{data_context}")
         
         prompt_parts.append(f"\nUser question: {user_message}")
-        prompt_parts.append("""
+        
+        # Add specific instructions based on query intent
+        if query_analysis.intent == "analyze" or "worth" in user_message.lower() or "should i" in user_message.lower():
+            prompt_parts.append("""
+## CRITICAL: This is an INVESTMENT ANALYSIS question - User wants your OPINION!
+
+Structure your response EXACTLY like this:
+
+### 1. VERDICT (First line - be direct!)
+Start with: "**Verdict: [RECOMMENDED/CONSIDER WITH CAUTION/AVOID]**" followed by one sentence why.
+
+### 2. PERFORMANCE ANALYSIS
+| Period | Return | Assessment |
+|--------|--------|------------|
+| 1 Year | X% | Good/Bad/Concerning |
+| 3 Year | X% | Above/Below average |
+| 5 Year | X% | Strong/Weak |
+
+### 3. KEY INSIGHTS
+- Bullet point analysis of the data
+- Compare to category average if possible
+- Note any red flags or positives
+
+### 4. WHO SHOULD INVEST
+- Risk profile: Conservative/Moderate/Aggressive
+- Time horizon: Short/Medium/Long term
+- Investment goal: Growth/Income/Tax saving
+
+### 5. WHO SHOULD AVOID
+- List investor types this fund is NOT suitable for
+
+### 6. FINAL RECOMMENDATION
+One clear, actionable sentence.
+""")
+        else:
+            prompt_parts.append("""
 ## Response Instructions
-Provide a comprehensive, well-formatted response following this structure:
+Provide a comprehensive, well-formatted response:
 
-1. **Start with a brief summary** (2-3 sentences)
+1. **Start with a direct answer** to the user's question
 2. **Use ## headers** for main sections
-3. **Use ### subheaders** for each fund/stock
-4. **Include a comparison table** if comparing multiple items
-5. **End with bullet-point takeaways**
-
+3. **Include data points** with analysis
+4. **End with actionable takeaways**
+""")
+        
+        prompt_parts.append("""
 FORMAT REQUIREMENTS:
 - Use markdown headers (## and ###)
 - Use bullet points (-) for lists
-- Use numbered lists for rankings
-- Use tables for comparisons
-- Add blank lines between sections
+- Use tables for data comparison
 - Keep paragraphs short (2-3 sentences)
 - NEVER write everything in one paragraph
-
-DATE PERIOD REQUIREMENTS:
-- If user specifies a time period (e.g., "march 2024 to april 2025"), use the MATCHING return period
-- For ~1 year periods, use 1Y returns (NOT 3Y)
-- For ~3 year periods, use 3Y returns
-- For ~5 year periods, use 5Y returns
-- Always mention the time period the user asked about in your response
 """)
         
         if user_profile:
