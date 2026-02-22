@@ -27,6 +27,7 @@ from app.utils.date_parser import (
     DateRange,
     get_period_key_for_range,
 )
+from app.utils.query_analyzer import analyze_query, QueryAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -128,54 +129,38 @@ def classify_query(query: str) -> str:
     return "fast"
 
 
+# Legacy functions kept for backward compatibility but now use LLM-based analyzer
 def extract_fund_names(query: str) -> list[str]:
-    """Extract potential fund names from the query."""
-    common_funds = [
-        "sbi bluechip", "hdfc top 100", "axis bluechip", "icici prudential",
-        "mirae asset", "kotak", "nippon", "aditya birla", "dsp", "uti",
-        "tata", "franklin", "invesco", "motilal oswal", "parag parikh",
-        "quant", "canara robeco", "bandhan", "edelweiss", "pgim"
-    ]
-    
+    """Legacy function - use analyze_query() instead for async LLM-based extraction."""
+    # Simple fallback extraction
     query_lower = query.lower()
-    found = []
-    
-    for fund in common_funds:
-        if fund in query_lower:
-            found.append(fund)
-    
-    return found
+    fund_houses = [
+        "sbi", "hdfc", "icici", "axis", "kotak", "nippon", "aditya birla",
+        "dsp", "uti", "tata", "franklin", "mirae", "parag parikh", "quant"
+    ]
+    return [h for h in fund_houses if h in query_lower]
 
 
 def extract_categories(query: str) -> list[str]:
-    """Extract fund categories from the query."""
+    """Legacy function - use analyze_query() instead for async LLM-based extraction."""
     categories = {
-        "large cap": ["large cap", "largecap", "large-cap", "bluechip", "blue chip"],
-        "mid cap": ["mid cap", "midcap", "mid-cap"],
-        "small cap": ["small cap", "smallcap", "small-cap"],
-        "index": ["index", "nifty", "sensex"],
-        "elss": ["elss", "tax saving", "tax saver"],
-        "debt": ["debt", "bond", "liquid", "money market"],
-        "hybrid": ["hybrid", "balanced", "aggressive"],
-        "flexi cap": ["flexi cap", "flexicap", "multi cap", "multicap"],
+        "large cap": ["large cap", "largecap", "bluechip"],
+        "mid cap": ["mid cap", "midcap"],
+        "small cap": ["small cap", "smallcap"],
+        "index": ["index fund"],
+        "elss": ["elss", "tax saving"],
+        "debt": ["debt", "bond", "liquid"],
+        "hybrid": ["hybrid", "balanced"],
+        "flexi cap": ["flexi cap", "flexicap", "multi cap"],
     }
-    
     query_lower = query.lower()
-    found = []
-    
-    for category, keywords in categories.items():
-        for keyword in keywords:
-            if keyword in query_lower:
-                found.append(category)
-                break
-    
-    return found
+    return [cat for cat, kws in categories.items() if any(kw in query_lower for kw in kws)]
 
 
 async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None) -> dict[str, Any]:
     """
-    Multi-step data fetching based on query analysis.
-    This is the key to providing detailed, data-driven responses.
+    Multi-step data fetching based on LLM query analysis.
+    Uses dynamic entity extraction to find any fund, not just from a static list.
     
     Args:
         query: User's question
@@ -190,26 +175,47 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
         "fetched_at": get_current_date_str(),
     }
     
-    logger.info(f"[DATA FETCH] Analyzing query: {query[:100]}...")
+    logger.info(f"[DATA FETCH] Analyzing query with LLM: {query[:100]}...")
+    
+    # Use LLM to analyze the query and extract entities
+    analysis = await analyze_query(query)
+    logger.info(f"[DATA FETCH] LLM Analysis: funds={analysis.fund_names}, categories={analysis.fund_categories}, stocks={analysis.stock_symbols}, intent={analysis.intent}")
+    
     if date_range:
         logger.info(f"[DATA FETCH] Date range requested: {date_range.period_label}")
     
-    fund_names = extract_fund_names(query)
-    categories = extract_categories(query)
-    
-    if fund_names:
-        logger.info(f"[DATA FETCH] Found fund names: {fund_names}")
-        for name in fund_names[:3]:
+    # Fetch specific funds mentioned by name
+    if analysis.fund_names:
+        logger.info(f"[DATA FETCH] Searching for funds: {analysis.fund_names}")
+        for fund_name in analysis.fund_names[:3]:
             try:
-                results = research_mutual_fund(name)
+                results = research_mutual_fund(fund_name)
                 if results:
-                    data["funds"].extend(results[:2])
+                    data["funds"].extend(results[:3])
+                    logger.info(f"[DATA FETCH] Found {len(results)} results for '{fund_name}'")
+                else:
+                    logger.warning(f"[DATA FETCH] No results for '{fund_name}'")
             except Exception as e:
-                logger.error(f"Error fetching fund {name}: {e}")
+                logger.error(f"Error fetching fund '{fund_name}': {e}")
     
-    if categories:
-        logger.info(f"[DATA FETCH] Found categories: {categories}")
-        for category in categories[:2]:
+    # Also search using search terms if provided
+    if analysis.search_terms:
+        for term in analysis.search_terms[:2]:
+            if term not in [f.lower() for f in analysis.fund_names]:
+                try:
+                    results = research_mutual_fund(term)
+                    if results:
+                        # Avoid duplicates
+                        existing_codes = {f.scheme_code for f in data["funds"]}
+                        new_funds = [f for f in results if f.scheme_code not in existing_codes]
+                        data["funds"].extend(new_funds[:2])
+                except Exception as e:
+                    logger.error(f"Error fetching search term '{term}': {e}")
+    
+    # Fetch funds by category
+    if analysis.fund_categories:
+        logger.info(f"[DATA FETCH] Fetching categories: {analysis.fund_categories}")
+        for category in analysis.fund_categories[:2]:
             try:
                 results = search_funds_by_category(category, limit=5)
                 if results:
@@ -218,11 +224,12 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
                         "funds": results
                     })
             except Exception as e:
-                logger.error(f"Error fetching category {category}: {e}")
+                logger.error(f"Error fetching category '{category}': {e}")
     
-    if not fund_names and not categories:
-        query_lower = query.lower()
-        if any(kw in query_lower for kw in ["top", "best", "performing", "recommend"]):
+    # If no specific funds or categories found, but intent suggests recommendation
+    if not data["funds"] and not data["categories"]:
+        if analysis.intent in ["recommend", "compare", "analyze"]:
+            logger.info("[DATA FETCH] No specific entities found, fetching default large cap funds")
             try:
                 results = search_funds_by_category("large cap", limit=5)
                 if results:
@@ -233,24 +240,25 @@ async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None
             except Exception as e:
                 logger.error(f"Error fetching default category: {e}")
     
-    query_lower = query.lower()
-    if any(kw in query_lower for kw in ["market", "nifty", "sensex", "index", "overview"]):
+    # Fetch market data if needed
+    if analysis.needs_market_data:
         try:
             data["market"] = research_market_overview()
         except Exception as e:
             logger.error(f"Error fetching market overview: {e}")
     
-    stock_keywords = ["reliance", "tcs", "infosys", "hdfc bank", "icici bank"]
-    for stock in stock_keywords:
-        if stock in query_lower:
+    # Fetch stock data
+    if analysis.stock_symbols:
+        logger.info(f"[DATA FETCH] Fetching stocks: {analysis.stock_symbols}")
+        for stock in analysis.stock_symbols[:3]:
             try:
-                result = research_stock(stock.upper().replace(" ", ""))
+                result = research_stock(stock)
                 if result:
                     data["stocks"].append(result)
             except Exception as e:
-                logger.error(f"Error fetching stock {stock}: {e}")
+                logger.error(f"Error fetching stock '{stock}': {e}")
     
-    logger.info(f"[DATA FETCH] Fetched {len(data['funds'])} funds, {len(data['stocks'])} stocks")
+    logger.info(f"[DATA FETCH] Completed: {len(data['funds'])} funds, {len(data['stocks'])} stocks, {len(data['categories'])} categories")
     return data
 
 

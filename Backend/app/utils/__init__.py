@@ -10,6 +10,12 @@ from app.utils.date_parser import (
     format_date_context,
 )
 
+from app.utils.query_analyzer import (
+    QueryAnalysis,
+    analyze_query,
+    analyze_query_regex,
+)
+
 __all__ = [
     "DateRange",
     "get_current_date",
@@ -20,4 +26,7 @@ __all__ = [
     "parse_date_query_regex",
     "get_period_key_for_range",
     "format_date_context",
+    "QueryAnalysis",
+    "analyze_query",
+    "analyze_query_regex",
 ]

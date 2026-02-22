@@ -31,6 +31,7 @@ def _get_fallback_funds_data() -> dict:
             {"scheme_code": "120505", "scheme_name": "ICICI Prudential Bluechip Fund - Growth", "nav": 78.92, "nav_date": today, "category": "Large Cap", "fund_house": "ICICI Prudential MF", "returns": {"1y": "16.2%", "3y": "13.1%"}},
         ],
         "mid cap": [
+            {"scheme_code": "118778", "scheme_name": "Nippon India Growth Fund - Growth", "nav": 3245.67, "nav_date": today, "category": "Mid Cap", "fund_house": "Nippon India MF", "returns": {"1y": "26.8%", "3y": "21.5%"}},
             {"scheme_code": "120837", "scheme_name": "Axis Midcap Fund - Growth", "nav": 89.23, "nav_date": today, "category": "Mid Cap", "fund_house": "Axis MF", "returns": {"1y": "22.5%", "3y": "18.2%"}},
             {"scheme_code": "118989", "scheme_name": "Kotak Emerging Equity Fund - Growth", "nav": 95.67, "nav_date": today, "category": "Mid Cap", "fund_house": "Kotak MF", "returns": {"1y": "24.1%", "3y": "19.5%"}},
             {"scheme_code": "119064", "scheme_name": "DSP Midcap Fund - Growth", "nav": 112.34, "nav_date": today, "category": "Mid Cap", "fund_house": "DSP MF", "returns": {"1y": "21.8%", "3y": "17.9%"}},
@@ -179,10 +180,57 @@ def research_mutual_fund(query: str) -> list[FundResearchResult]:
 
 
 def _get_fallback_funds_for_query(query: str) -> list[FundResearchResult]:
-    """Get fallback fund data when live fetch fails."""
+    """
+    Get fallback fund data when live fetch fails.
+    Uses intelligent matching to find the most relevant funds.
+    """
     query_lower = query.lower()
+    query_words = [w for w in query_lower.split() if len(w) > 2]
     fallback_data = get_fallback_funds()
     
+    # First, try to find funds that match the query words
+    all_funds = []
+    for category, funds in fallback_data.items():
+        all_funds.extend(funds)
+    
+    # Score each fund based on how well it matches the query
+    scored_funds = []
+    for fund in all_funds:
+        fund_name_lower = fund["scheme_name"].lower()
+        fund_house_lower = fund["fund_house"].lower()
+        category_lower = fund["category"].lower()
+        
+        score = 0
+        # Check for word matches in fund name
+        for word in query_words:
+            if word in fund_name_lower:
+                score += 3
+            elif word in fund_house_lower:
+                score += 2
+            elif word in category_lower:
+                score += 1
+        
+        if score > 0:
+            scored_funds.append((fund, score))
+    
+    # Sort by score and return top matches
+    if scored_funds:
+        scored_funds.sort(key=lambda x: x[1], reverse=True)
+        logger.info(f"Fallback search '{query}': found {len(scored_funds)} matching funds")
+        return [
+            FundResearchResult(
+                scheme_code=f["scheme_code"],
+                scheme_name=f["scheme_name"],
+                nav=f["nav"],
+                nav_date=f["nav_date"],
+                category=f["category"],
+                fund_house=f["fund_house"],
+                returns=f["returns"],
+            )
+            for f, _ in scored_funds[:5]
+        ]
+    
+    # If no word matches, try category matching
     for category, funds in fallback_data.items():
         if category in query_lower or query_lower in category:
             return [
@@ -198,6 +246,7 @@ def _get_fallback_funds_for_query(query: str) -> list[FundResearchResult]:
                 for f in funds
             ]
     
+    # Legacy keyword mapping as final fallback
     fund_keywords = {
         "sbi": "large cap",
         "hdfc": "large cap",
@@ -205,7 +254,7 @@ def _get_fallback_funds_for_query(query: str) -> list[FundResearchResult]:
         "icici": "large cap",
         "mirae": "large cap",
         "kotak": "mid cap",
-        "nippon": "small cap",
+        "nippon": "mid cap",  # Changed from small cap to mid cap
         "parag parikh": "flexi cap",
         "ppfas": "flexi cap",
         "uti": "index",
@@ -232,6 +281,7 @@ def _get_fallback_funds_for_query(query: str) -> list[FundResearchResult]:
                     for f in matching_funds
                 ]
     
+    # Return default large cap funds if nothing matches
     return [
         FundResearchResult(
             scheme_code=f["scheme_code"],

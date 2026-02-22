@@ -37,21 +37,69 @@ class FundRepository:
             return {}
     
     def search_schemes(self, query: str, limit: int = 20) -> list[MutualFund]:
-        """Search for schemes by name."""
-        query_lower = query.lower()
+        """
+        Search for schemes by name with intelligent matching.
+        Uses multiple strategies: exact match, all words match, partial match.
+        """
         schemes = self.get_all_schemes()
+        if not schemes:
+            logger.warning("No schemes available from AMFI API")
+            return []
+        
+        query_lower = query.lower().strip()
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        
+        exact_matches = []
+        all_words_matches = []
+        partial_matches = []
+        
+        for code, name in schemes.items():
+            name_lower = name.lower()
+            
+            # Strategy 1: Exact substring match (highest priority)
+            if query_lower in name_lower:
+                exact_matches.append((code, name))
+                continue
+            
+            # Strategy 2: All query words present in name
+            if query_words and all(word in name_lower for word in query_words):
+                all_words_matches.append((code, name))
+                continue
+            
+            # Strategy 3: Most query words present (for partial matches)
+            if query_words:
+                matches = sum(1 for word in query_words if word in name_lower)
+                if matches >= len(query_words) * 0.6:  # At least 60% of words match
+                    partial_matches.append((code, name, matches))
+        
+        # Sort partial matches by number of matching words
+        partial_matches.sort(key=lambda x: x[2], reverse=True)
+        
+        # Combine results with priority
+        combined = exact_matches + all_words_matches + [(c, n) for c, n, _ in partial_matches]
+        
+        logger.info(f"Search '{query}': {len(exact_matches)} exact, {len(all_words_matches)} all-words, {len(partial_matches)} partial")
         
         results = []
-        for code, name in schemes.items():
-            if query_lower in name.lower():
-                fund = MutualFund(scheme_code=code, scheme_name=name)
+        seen_codes = set()
+        
+        for code, name in combined:
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
+            
+            fund = MutualFund(scheme_code=code, scheme_name=name)
+            try:
                 quote = self.get_scheme_quote(code)
                 if quote:
                     fund.nav = quote.get("nav")
                     fund.nav_date = quote.get("nav_date")
-                results.append(fund)
-                if len(results) >= limit:
-                    break
+            except Exception as e:
+                logger.warning(f"Could not get quote for {code}: {e}")
+            
+            results.append(fund)
+            if len(results) >= limit:
+                break
         
         return results
     
