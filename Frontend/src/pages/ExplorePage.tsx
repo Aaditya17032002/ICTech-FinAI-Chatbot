@@ -138,8 +138,8 @@ export const ExplorePage: React.FC = () => {
         isLoading={isModalLoading}
       />
 
-      {/* Bottom CTA */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30">
+      {/* Bottom CTA - Hidden on mobile/tablet since we have navigation */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 hidden lg:block">
         <a 
           href="/"
           className="flex items-center gap-3 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-8 py-4 rounded-2xl font-bold shadow-2xl hover:scale-105 transition-all group"

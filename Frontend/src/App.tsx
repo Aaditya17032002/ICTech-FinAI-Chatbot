@@ -51,9 +51,15 @@ function Navigation() {
 function MobileNav() {
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
+  
+  // Hide mobile nav on chat page to avoid overlapping with chat input
+  const isChatPage = location.pathname === "/";
 
   return (
-    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex lg:hidden items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 p-2 rounded-2xl shadow-2xl">
+    <nav className={cn(
+      "fixed left-1/2 -translate-x-1/2 z-50 flex lg:hidden items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 p-2 rounded-2xl shadow-2xl transition-all",
+      isChatPage ? "top-24" : "bottom-6"
+    )}>
       <Link 
         to="/" 
         className={cn(

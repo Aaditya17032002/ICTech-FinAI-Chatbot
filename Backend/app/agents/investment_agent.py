@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
@@ -19,6 +19,14 @@ from app.agents.tools.researcher import (
     research_market_overview,
     search_funds_by_category,
 )
+from app.utils.date_parser import (
+    parse_date_query,
+    format_date_context,
+    get_current_date_str,
+    get_current_date_display,
+    DateRange,
+    get_period_key_for_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +37,8 @@ class AgentDependencies(BaseModel):
     user_query: str = ""
     fetched_data: dict[str, Any] = {}
     user_profile_summary: str = ""
+    date_context: str = ""
+    requested_period: str = ""
 
 
 settings = get_settings()
@@ -49,19 +59,35 @@ When answering questions, follow this structured approach:
 
 1. **Data Gathering**: First identify what data is needed to answer the question properly
 2. **Analysis**: Analyze the gathered data with relevant metrics (NAV, returns, risk)
-3. **Comparison**: If comparing funds/stocks, create a structured comparison
+3. **Comparison**: If comparing funds/stocks, create a structured comparison TABLE
 4. **Recommendation**: Provide actionable insights based on the analysis
-
-## Response Format
-- Always include specific data points with actual values
-- Cite the source and date for all data
-- Structure complex responses with clear sections
-- Include relevant metrics like CAGR, expense ratio, AUM when available
 
 ## Data Available
 You have access to real-time data from:
-- AMFI India for mutual fund NAVs and returns
-- Yahoo Finance for stock prices and market indices
+- AMFI India for mutual fund NAVs and returns (fetched live)
+- Yahoo Finance for stock prices and market indices (fetched live)
+
+## IMPORTANT: Date Handling
+- The current date is provided in the context - USE IT
+- If user asks about "last year", "2024-2025", etc., the date range is calculated and provided
+- NEVER say "as of my training data" or "as of August 2024" - use the actual dates from the data
+- All data shown is fetched in real-time at the moment of the query
+
+## CRITICAL: Response Structure
+Your response MUST follow this structure:
+
+1. Start with a brief introduction (1-2 sentences)
+2. Use ## headers for each major section
+3. List each fund/stock with ### subheaders
+4. Include a comparison table if multiple items
+5. End with key takeaways as bullet points
+
+NEVER write a wall of text. ALWAYS use:
+- Headers (## and ###)
+- Bullet points (-)
+- Numbered lists (1. 2. 3.)
+- Tables for comparisons
+- Line breaks between sections
 """
 
 fast_agent = Agent(
@@ -146,19 +172,27 @@ def extract_categories(query: str) -> list[str]:
     return found
 
 
-async def fetch_relevant_data(query: str) -> dict[str, Any]:
+async def fetch_relevant_data(query: str, date_range: Optional[DateRange] = None) -> dict[str, Any]:
     """
     Multi-step data fetching based on query analysis.
     This is the key to providing detailed, data-driven responses.
+    
+    Args:
+        query: User's question
+        date_range: Optional parsed date range from the query
     """
     data = {
         "funds": [],
         "stocks": [],
         "market": None,
         "categories": [],
+        "date_range": date_range,
+        "fetched_at": get_current_date_str(),
     }
     
     logger.info(f"[DATA FETCH] Analyzing query: {query[:100]}...")
+    if date_range:
+        logger.info(f"[DATA FETCH] Date range requested: {date_range.period_label}")
     
     fund_names = extract_fund_names(query)
     categories = extract_categories(query)
@@ -220,36 +254,58 @@ async def fetch_relevant_data(query: str) -> dict[str, Any]:
     return data
 
 
-def format_data_for_prompt(data: dict[str, Any]) -> str:
+def format_data_for_prompt(data: dict[str, Any], date_range: Optional[DateRange] = None) -> str:
     """Format fetched data into a structured prompt section."""
     sections = []
     
+    # Add date context at the top
+    sections.append(format_date_context(date_range))
+    
+    # Add data fetch timestamp
+    fetched_at = data.get("fetched_at", get_current_date_str())
+    sections.append(f"**Data fetched at:** {fetched_at}\n")
+    
+    if date_range:
+        period_key = get_period_key_for_range(date_range)
+        sections.append(f"**Requested analysis period:** {date_range.period_label} (use {period_key} returns for comparison)\n")
+    
     if data.get("funds"):
-        sections.append("## Real-Time Fund Data:")
+        sections.append("## Real-Time Fund Data (Live from AMFI India):")
         for fund in data["funds"]:
+            nav_date = fund.nav_date or fetched_at
+            source_url = getattr(fund, 'source_url', '') or f"https://www.amfiindia.com/net-asset-value-details?SchemeCode={fund.scheme_code}"
             sections.append(f"""
 **{fund.scheme_name}** (Code: {fund.scheme_code})
-- NAV: ₹{fund.nav} (as of {fund.nav_date})
+- NAV: ₹{fund.nav} (as of {nav_date})
 - Category: {fund.category or 'N/A'}
 - Fund House: {fund.fund_house or 'N/A'}
 - Returns: {', '.join([f'{k}: {v}' for k, v in fund.returns.items()]) if fund.returns else 'N/A'}
+- Source: [AMFI India - {fund.scheme_code}]({source_url})
 """)
     
     if data.get("categories"):
         for cat_data in data["categories"]:
-            sections.append(f"\n## Top {cat_data['category'].title()} Funds:")
+            sections.append(f"\n## Top {cat_data['category'].title()} Funds (Live Data):")
             for i, fund in enumerate(cat_data["funds"][:5], 1):
-                sections.append(f"{i}. **{fund.scheme_name}** - NAV: ₹{fund.nav}, Returns: {fund.returns}")
+                nav_date = fund.nav_date if hasattr(fund, 'nav_date') and fund.nav_date else fetched_at
+                source_url = getattr(fund, 'source_url', '') or f"https://www.amfiindia.com/net-asset-value-details?SchemeCode={fund.scheme_code}"
+                sections.append(f"{i}. **{fund.scheme_name}** (Code: {fund.scheme_code})")
+                sections.append(f"   - NAV: ₹{fund.nav} (as of {nav_date}), Returns: {fund.returns}")
+                sections.append(f"   - [View on AMFI]({source_url})")
     
     if data.get("market"):
-        sections.append("\n## Market Overview:")
-        for index, values in data["market"].indices.items():
-            sections.append(f"- {index}: {values.get('value', 'N/A')} ({values.get('change_percent', 0):+.2f}%)")
+        sections.append("\n## Market Overview (Live from Yahoo Finance):")
+        market_data = data["market"]
+        source_urls = getattr(market_data, 'source_urls', {}) or {}
+        for index, values in market_data.indices.items():
+            url = source_urls.get(index, f"https://finance.yahoo.com/quote/^NSEI/")
+            sections.append(f"- {index}: {values.get('value', 'N/A')} ({values.get('change_percent', 0):+.2f}%) - [View on Yahoo Finance]({url})")
     
     if data.get("stocks"):
-        sections.append("\n## Stock Data:")
+        sections.append("\n## Stock Data (Live from Yahoo Finance):")
         for stock in data["stocks"]:
-            sections.append(f"- {stock.symbol}: ₹{stock.current_price} ({stock.change_percent:+.2f}%)")
+            source_url = getattr(stock, 'source_url', '') or f"https://finance.yahoo.com/quote/{stock.symbol}/"
+            sections.append(f"- {stock.symbol}: ₹{stock.current_price} ({stock.change_percent:+.2f}%) - [View on Yahoo Finance]({source_url})")
     
     return "\n".join(sections) if sections else ""
 
@@ -290,28 +346,66 @@ def create_data_points_from_data(data: dict[str, Any]) -> list[DataPoint]:
 
 
 def create_sources_from_data(data: dict[str, Any]) -> list[Source]:
-    """Create source citations from fetched data."""
+    """Create source citations from fetched data with exact URLs."""
     sources = []
     now = datetime.utcnow()
+    added_urls = set()
     
-    if data.get("funds") or data.get("categories"):
-        sources.append(Source(
-            name="AMFI India",
-            url="https://www.amfiindia.com",
-            accessed_at=now,
-        ))
+    # Add specific fund sources
+    if data.get("funds"):
+        for fund in data["funds"][:3]:
+            url = getattr(fund, 'source_url', '') or f"https://www.amfiindia.com/net-asset-value-details?SchemeCode={fund.scheme_code}"
+            if url not in added_urls:
+                sources.append(Source(
+                    name=f"AMFI India - {fund.scheme_name[:40]}",
+                    url=url,
+                    accessed_at=now,
+                ))
+                added_urls.add(url)
     
-    if data.get("stocks") or data.get("market"):
-        sources.append(Source(
-            name="Yahoo Finance",
-            url="https://finance.yahoo.com",
-            accessed_at=now,
-        ))
+    # Add category fund sources
+    if data.get("categories"):
+        for cat_data in data["categories"][:1]:
+            for fund in cat_data["funds"][:2]:
+                url = getattr(fund, 'source_url', '') or f"https://www.amfiindia.com/net-asset-value-details?SchemeCode={fund.scheme_code}"
+                if url not in added_urls:
+                    sources.append(Source(
+                        name=f"AMFI India - {fund.scheme_name[:40]}",
+                        url=url,
+                        accessed_at=now,
+                    ))
+                    added_urls.add(url)
     
+    # Add stock sources
+    if data.get("stocks"):
+        for stock in data["stocks"][:3]:
+            url = getattr(stock, 'source_url', '') or f"https://finance.yahoo.com/quote/{stock.symbol}/"
+            if url not in added_urls:
+                sources.append(Source(
+                    name=f"Yahoo Finance - {stock.name or stock.symbol}",
+                    url=url,
+                    accessed_at=now,
+                ))
+                added_urls.add(url)
+    
+    # Add market index sources
+    if data.get("market"):
+        market_data = data["market"]
+        source_urls = getattr(market_data, 'source_urls', {}) or {}
+        for index_name, url in list(source_urls.items())[:2]:
+            if url not in added_urls:
+                sources.append(Source(
+                    name=f"Yahoo Finance - {index_name}",
+                    url=url,
+                    accessed_at=now,
+                ))
+                added_urls.add(url)
+    
+    # Fallback if no specific sources
     if not sources:
         sources.append(Source(
-            name="AMFI India",
-            url="https://www.amfiindia.com",
+            name="AMFI India - NAV Data",
+            url="https://www.amfiindia.com/net-asset-value-details",
             accessed_at=now,
         ))
     
@@ -336,8 +430,13 @@ async def run_agent(
     """
     start_time = time.time()
     
+    # Parse date range from query
+    date_range = parse_date_query(user_message)
+    if date_range:
+        logger.info(f"[AGENT] Detected date range: {date_range.period_label}")
+    
     logger.info(f"[AGENT] Step 1: Fetching relevant data...")
-    fetched_data = await fetch_relevant_data(user_message)
+    fetched_data = await fetch_relevant_data(user_message, date_range)
     
     if user_profile:
         for category in user_profile.get_recommended_categories()[:2]:
@@ -360,17 +459,27 @@ async def run_agent(
     
     profile_summary = user_profile.get_profile_summary() if user_profile else ""
     
+    # Generate date context
+    date_context = format_date_context(date_range)
+    requested_period = date_range.period_label if date_range else ""
+    
     deps = AgentDependencies(
         user_query=user_message,
         conversation_history=conversation_history or [],
         fetched_data=fetched_data,
         user_profile_summary=profile_summary,
+        date_context=date_context,
+        requested_period=requested_period,
     )
     
     try:
-        data_context = format_data_for_prompt(fetched_data)
+        data_context = format_data_for_prompt(fetched_data, date_range)
         
         prompt_parts = []
+        
+        # Always add date context first
+        prompt_parts.append(date_context)
+        prompt_parts.append(f"\n**IMPORTANT:** Today is {get_current_date_display()}. All data below is fetched LIVE. Do not use your training data for any financial figures.\n")
         
         if profile_summary:
             prompt_parts.append(f"## User Investment Profile\n{profile_summary}")
@@ -385,7 +494,25 @@ async def run_agent(
             prompt_parts.append(f"\n{data_context}")
         
         prompt_parts.append(f"\nUser question: {user_message}")
-        prompt_parts.append("\nProvide a comprehensive, well-structured response with specific data points and actionable insights.")
+        prompt_parts.append("""
+## Response Instructions
+Provide a comprehensive, well-formatted response following this structure:
+
+1. **Start with a brief summary** (2-3 sentences)
+2. **Use ## headers** for main sections
+3. **Use ### subheaders** for each fund/stock
+4. **Include a comparison table** if comparing multiple items
+5. **End with bullet-point takeaways**
+
+FORMAT REQUIREMENTS:
+- Use markdown headers (## and ###)
+- Use bullet points (-) for lists
+- Use numbered lists for rankings
+- Use tables for comparisons
+- Add blank lines between sections
+- Keep paragraphs short (2-3 sentences)
+- NEVER write everything in one paragraph
+""")
         
         if user_profile:
             prompt_parts.append(f"\nRemember to consider the user's {user_profile.risk_tolerance.value} risk tolerance and {user_profile.investment_horizon.value.replace('_', ' ')} investment horizon.")
@@ -425,8 +552,13 @@ async def run_agent_stream(
     conversation_history: list[dict[str, str]] = None
 ) -> AsyncGenerator[Any, None]:
     """Run the investment advisor agent with streaming output."""
+    # Parse date range from query
+    date_range = parse_date_query(user_message)
+    if date_range:
+        logger.info(f"[AGENT STREAM] Detected date range: {date_range.period_label}")
+    
     logger.info(f"[AGENT STREAM] Step 1: Fetching relevant data...")
-    fetched_data = await fetch_relevant_data(user_message)
+    fetched_data = await fetch_relevant_data(user_message, date_range)
     
     query_type = classify_query(user_message)
     selected_agent = reasoning_agent if query_type == "reasoning" else fast_agent
@@ -434,16 +566,26 @@ async def run_agent_stream(
     
     logger.info(f"[AGENT STREAM] Step 2: Processing with {model_name}...")
     
+    # Generate date context
+    date_context = format_date_context(date_range)
+    
     deps = AgentDependencies(
         user_query=user_message,
         conversation_history=conversation_history or [],
         fetched_data=fetched_data,
+        date_context=date_context,
+        requested_period=date_range.period_label if date_range else "",
     )
     
     try:
-        data_context = format_data_for_prompt(fetched_data)
+        data_context = format_data_for_prompt(fetched_data, date_range)
         
         prompt_parts = []
+        
+        # Always add date context first
+        prompt_parts.append(date_context)
+        prompt_parts.append(f"\n**IMPORTANT:** Today is {get_current_date_display()}. All data below is fetched LIVE. Do not use your training data for any financial figures.\n")
+        
         if conversation_history:
             recent = conversation_history[-4:]
             context = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')[:200]}" for m in recent])
@@ -453,7 +595,26 @@ async def run_agent_stream(
             prompt_parts.append(f"\n{data_context}")
         
         prompt_parts.append(f"\nUser question: {user_message}")
-        prompt_parts.append("\nProvide a comprehensive, well-structured response with specific data points.")
+        prompt_parts.append("""
+## Response Instructions
+Provide a comprehensive, well-formatted response following this structure:
+
+1. **Start with a brief summary** (2-3 sentences)
+2. **Use ## headers** for main sections
+3. **Use ### subheaders** for each fund/stock
+4. **Include a comparison table** if comparing multiple items
+5. **End with bullet-point takeaways**
+
+FORMAT REQUIREMENTS:
+- Use markdown headers (## and ###)
+- Use bullet points (-) for lists
+- Use numbered lists for rankings
+- Use tables for comparisons
+- Add blank lines between sections
+- Keep paragraphs short (2-3 sentences)
+- NEVER write everything in one paragraph
+- Use ONLY the data provided above
+""")
         
         prompt = "\n".join(prompt_parts)
         

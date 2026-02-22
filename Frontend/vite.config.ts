@@ -12,7 +12,7 @@ export default defineConfig({
   },
   build: {
     outDir: '../Backend/static',
-    emptyDirBeforeBuild: true,
+    emptyOutDir: true,
   },
   server: {
     hmr: true,

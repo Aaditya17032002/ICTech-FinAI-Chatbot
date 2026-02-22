@@ -6,43 +6,84 @@ from pydantic import BaseModel, Field
 
 from app.services.mutual_fund_service import get_mutual_fund_service
 from app.services.stock_service import get_stock_service
+from app.utils.date_parser import get_current_date_str, DateRange, get_period_key_for_range
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_FUNDS = {
-    "large cap": [
-        {"scheme_code": "119598", "scheme_name": "SBI Blue Chip Fund - Growth", "nav": 85.67, "nav_date": "2026-02-20", "category": "Large Cap", "fund_house": "SBI MF", "returns": {"1y": "15.3%", "3y": "12.8%"}},
-        {"scheme_code": "118834", "scheme_name": "HDFC Top 100 Fund - Growth", "nav": 924.12, "nav_date": "2026-02-20", "category": "Large Cap", "fund_house": "HDFC MF", "returns": {"1y": "14.7%", "3y": "11.9%"}},
-        {"scheme_code": "120503", "scheme_name": "Axis Bluechip Fund - Growth", "nav": 52.34, "nav_date": "2026-02-20", "category": "Large Cap", "fund_house": "Axis MF", "returns": {"1y": "13.8%", "3y": "10.5%"}},
-        {"scheme_code": "118989", "scheme_name": "Mirae Asset Large Cap Fund - Growth", "nav": 98.45, "nav_date": "2026-02-20", "category": "Large Cap", "fund_house": "Mirae Asset MF", "returns": {"1y": "17.5%", "3y": "14.2%"}},
-        {"scheme_code": "120505", "scheme_name": "ICICI Prudential Bluechip Fund - Growth", "nav": 78.92, "nav_date": "2026-02-20", "category": "Large Cap", "fund_house": "ICICI Prudential MF", "returns": {"1y": "16.2%", "3y": "13.1%"}},
-    ],
-    "mid cap": [
-        {"scheme_code": "120837", "scheme_name": "Axis Midcap Fund - Growth", "nav": 89.23, "nav_date": "2026-02-20", "category": "Mid Cap", "fund_house": "Axis MF", "returns": {"1y": "22.5%", "3y": "18.2%"}},
-        {"scheme_code": "118989", "scheme_name": "Kotak Emerging Equity Fund - Growth", "nav": 95.67, "nav_date": "2026-02-20", "category": "Mid Cap", "fund_house": "Kotak MF", "returns": {"1y": "24.1%", "3y": "19.5%"}},
-        {"scheme_code": "119064", "scheme_name": "DSP Midcap Fund - Growth", "nav": 112.34, "nav_date": "2026-02-20", "category": "Mid Cap", "fund_house": "DSP MF", "returns": {"1y": "21.8%", "3y": "17.9%"}},
-    ],
-    "small cap": [
-        {"scheme_code": "125494", "scheme_name": "Nippon India Small Cap Fund - Growth", "nav": 145.67, "nav_date": "2026-02-20", "category": "Small Cap", "fund_house": "Nippon India MF", "returns": {"1y": "32.5%", "3y": "25.2%"}},
-        {"scheme_code": "125497", "scheme_name": "SBI Small Cap Fund - Growth", "nav": 167.89, "nav_date": "2026-02-20", "category": "Small Cap", "fund_house": "SBI MF", "returns": {"1y": "28.7%", "3y": "22.1%"}},
-    ],
-    "index": [
-        {"scheme_code": "100356", "scheme_name": "UTI Nifty 50 Index Fund - Growth", "nav": 145.67, "nav_date": "2026-02-20", "category": "Index Fund", "fund_house": "UTI MF", "returns": {"1y": "14.5%", "3y": "12.0%"}},
-        {"scheme_code": "120684", "scheme_name": "HDFC Index Fund - Nifty 50 Plan", "nav": 198.34, "nav_date": "2026-02-20", "category": "Index Fund", "fund_house": "HDFC MF", "returns": {"1y": "14.3%", "3y": "11.8%"}},
-    ],
-    "elss": [
-        {"scheme_code": "120503", "scheme_name": "Axis Long Term Equity Fund - Growth", "nav": 78.45, "nav_date": "2026-02-20", "category": "ELSS", "fund_house": "Axis MF", "returns": {"1y": "16.2%", "3y": "13.5%"}},
-        {"scheme_code": "119775", "scheme_name": "Mirae Asset Tax Saver Fund - Growth", "nav": 42.67, "nav_date": "2026-02-20", "category": "ELSS", "fund_house": "Mirae Asset MF", "returns": {"1y": "18.9%", "3y": "15.2%"}},
-    ],
-    "flexi cap": [
-        {"scheme_code": "120847", "scheme_name": "Parag Parikh Flexi Cap Fund - Growth", "nav": 67.89, "nav_date": "2026-02-20", "category": "Flexi Cap", "fund_house": "PPFAS MF", "returns": {"1y": "19.8%", "3y": "16.5%"}},
-        {"scheme_code": "118825", "scheme_name": "HDFC Flexi Cap Fund - Growth", "nav": 1456.78, "nav_date": "2026-02-20", "category": "Flexi Cap", "fund_house": "HDFC MF", "returns": {"1y": "17.2%", "3y": "14.8%"}},
-    ],
-    "debt": [
-        {"scheme_code": "119551", "scheme_name": "HDFC Short Term Debt Fund - Growth", "nav": 28.45, "nav_date": "2026-02-20", "category": "Debt", "fund_house": "HDFC MF", "returns": {"1y": "7.2%", "3y": "6.8%"}},
-        {"scheme_code": "119552", "scheme_name": "ICICI Prudential Short Term Fund - Growth", "nav": 52.34, "nav_date": "2026-02-20", "category": "Debt", "fund_house": "ICICI Prudential MF", "returns": {"1y": "7.5%", "3y": "7.1%"}},
-    ],
-}
+
+def _get_today_str() -> str:
+    """Get today's date string for dynamic fallback data."""
+    return get_current_date_str()
+
+
+def _get_fallback_funds_data() -> dict:
+    """
+    Generate fallback fund data with current date.
+    This ensures dates are always current, not hardcoded.
+    """
+    today = _get_today_str()
+    return {
+        "large cap": [
+            {"scheme_code": "119598", "scheme_name": "SBI Blue Chip Fund - Growth", "nav": 85.67, "nav_date": today, "category": "Large Cap", "fund_house": "SBI MF", "returns": {"1y": "15.3%", "3y": "12.8%"}},
+            {"scheme_code": "118834", "scheme_name": "HDFC Top 100 Fund - Growth", "nav": 924.12, "nav_date": today, "category": "Large Cap", "fund_house": "HDFC MF", "returns": {"1y": "14.7%", "3y": "11.9%"}},
+            {"scheme_code": "120503", "scheme_name": "Axis Bluechip Fund - Growth", "nav": 52.34, "nav_date": today, "category": "Large Cap", "fund_house": "Axis MF", "returns": {"1y": "13.8%", "3y": "10.5%"}},
+            {"scheme_code": "118989", "scheme_name": "Mirae Asset Large Cap Fund - Growth", "nav": 98.45, "nav_date": today, "category": "Large Cap", "fund_house": "Mirae Asset MF", "returns": {"1y": "17.5%", "3y": "14.2%"}},
+            {"scheme_code": "120505", "scheme_name": "ICICI Prudential Bluechip Fund - Growth", "nav": 78.92, "nav_date": today, "category": "Large Cap", "fund_house": "ICICI Prudential MF", "returns": {"1y": "16.2%", "3y": "13.1%"}},
+        ],
+        "mid cap": [
+            {"scheme_code": "120837", "scheme_name": "Axis Midcap Fund - Growth", "nav": 89.23, "nav_date": today, "category": "Mid Cap", "fund_house": "Axis MF", "returns": {"1y": "22.5%", "3y": "18.2%"}},
+            {"scheme_code": "118989", "scheme_name": "Kotak Emerging Equity Fund - Growth", "nav": 95.67, "nav_date": today, "category": "Mid Cap", "fund_house": "Kotak MF", "returns": {"1y": "24.1%", "3y": "19.5%"}},
+            {"scheme_code": "119064", "scheme_name": "DSP Midcap Fund - Growth", "nav": 112.34, "nav_date": today, "category": "Mid Cap", "fund_house": "DSP MF", "returns": {"1y": "21.8%", "3y": "17.9%"}},
+        ],
+        "small cap": [
+            {"scheme_code": "125494", "scheme_name": "Nippon India Small Cap Fund - Growth", "nav": 145.67, "nav_date": today, "category": "Small Cap", "fund_house": "Nippon India MF", "returns": {"1y": "32.5%", "3y": "25.2%"}},
+            {"scheme_code": "125497", "scheme_name": "SBI Small Cap Fund - Growth", "nav": 167.89, "nav_date": today, "category": "Small Cap", "fund_house": "SBI MF", "returns": {"1y": "28.7%", "3y": "22.1%"}},
+        ],
+        "index": [
+            {"scheme_code": "100356", "scheme_name": "UTI Nifty 50 Index Fund - Growth", "nav": 145.67, "nav_date": today, "category": "Index Fund", "fund_house": "UTI MF", "returns": {"1y": "14.5%", "3y": "12.0%"}},
+            {"scheme_code": "120684", "scheme_name": "HDFC Index Fund - Nifty 50 Plan", "nav": 198.34, "nav_date": today, "category": "Index Fund", "fund_house": "HDFC MF", "returns": {"1y": "14.3%", "3y": "11.8%"}},
+        ],
+        "elss": [
+            {"scheme_code": "120503", "scheme_name": "Axis Long Term Equity Fund - Growth", "nav": 78.45, "nav_date": today, "category": "ELSS", "fund_house": "Axis MF", "returns": {"1y": "16.2%", "3y": "13.5%"}},
+            {"scheme_code": "119775", "scheme_name": "Mirae Asset Tax Saver Fund - Growth", "nav": 42.67, "nav_date": today, "category": "ELSS", "fund_house": "Mirae Asset MF", "returns": {"1y": "18.9%", "3y": "15.2%"}},
+        ],
+        "flexi cap": [
+            {"scheme_code": "120847", "scheme_name": "Parag Parikh Flexi Cap Fund - Growth", "nav": 67.89, "nav_date": today, "category": "Flexi Cap", "fund_house": "PPFAS MF", "returns": {"1y": "19.8%", "3y": "16.5%"}},
+            {"scheme_code": "118825", "scheme_name": "HDFC Flexi Cap Fund - Growth", "nav": 1456.78, "nav_date": today, "category": "Flexi Cap", "fund_house": "HDFC MF", "returns": {"1y": "17.2%", "3y": "14.8%"}},
+        ],
+        "debt": [
+            {"scheme_code": "119551", "scheme_name": "HDFC Short Term Debt Fund - Growth", "nav": 28.45, "nav_date": today, "category": "Debt", "fund_house": "HDFC MF", "returns": {"1y": "7.2%", "3y": "6.8%"}},
+            {"scheme_code": "119552", "scheme_name": "ICICI Prudential Short Term Fund - Growth", "nav": 52.34, "nav_date": today, "category": "Debt", "fund_house": "ICICI Prudential MF", "returns": {"1y": "7.5%", "3y": "7.1%"}},
+        ],
+    }
+
+
+def get_fallback_funds() -> dict:
+    """Get fallback funds with current date."""
+    return _get_fallback_funds_data()
+
+
+def get_amfi_fund_url(scheme_code: str) -> str:
+    """Generate exact AMFI URL for a mutual fund scheme."""
+    return f"https://www.amfiindia.com/net-asset-value-details?mf=ALL&cat=ALL&aession=CURRENTDATE&SchemeCode={scheme_code}"
+
+
+def get_moneycontrol_fund_url(scheme_name: str) -> str:
+    """Generate MoneyControl URL for detailed fund info."""
+    slug = scheme_name.lower().replace(" ", "-").replace("---", "-").replace("--", "-")
+    slug = ''.join(c for c in slug if c.isalnum() or c == '-')
+    return f"https://www.moneycontrol.com/mutual-funds/nav/{slug}"
+
+
+def get_yahoo_stock_url(symbol: str) -> str:
+    """Generate exact Yahoo Finance URL for a stock."""
+    clean_symbol = symbol.replace(".NS", "").replace(".BO", "")
+    return f"https://finance.yahoo.com/quote/{symbol}/"
+
+
+def get_yahoo_index_url(index_symbol: str) -> str:
+    """Generate Yahoo Finance URL for an index."""
+    return f"https://finance.yahoo.com/quote/{index_symbol}/"
 
 
 class FundResearchResult(BaseModel):
@@ -55,8 +96,16 @@ class FundResearchResult(BaseModel):
     fund_house: Optional[str] = None
     returns: dict[str, str] = Field(default_factory=dict)
     source: str = "AMFI India"
-    source_url: str = "https://www.amfiindia.com"
+    source_url: str = ""
+    moneycontrol_url: str = ""
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.source_url:
+            self.source_url = get_amfi_fund_url(self.scheme_code)
+        if not self.moneycontrol_url:
+            self.moneycontrol_url = get_moneycontrol_fund_url(self.scheme_name)
 
 
 class StockResearchResult(BaseModel):
@@ -69,14 +118,20 @@ class StockResearchResult(BaseModel):
     pe_ratio: Optional[float] = None
     returns: dict[str, str] = Field(default_factory=dict)
     source: str = "Yahoo Finance"
-    source_url: str = "https://finance.yahoo.com"
+    source_url: str = ""
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.source_url and self.symbol:
+            self.source_url = get_yahoo_stock_url(self.symbol)
 
 
 class MarketOverviewResult(BaseModel):
     """Result from fetching market overview."""
     indices: dict[str, dict[str, Any]] = Field(default_factory=dict)
     source: str = "Yahoo Finance"
+    source_urls: dict[str, str] = Field(default_factory=dict)
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -118,16 +173,17 @@ def research_mutual_fund(query: str) -> list[FundResearchResult]:
     
     if not results:
         logger.info(f"Using fallback data for query: {query}")
-        results = _get_fallback_funds(query)
+        results = _get_fallback_funds_for_query(query)
     
     return results
 
 
-def _get_fallback_funds(query: str) -> list[FundResearchResult]:
+def _get_fallback_funds_for_query(query: str) -> list[FundResearchResult]:
     """Get fallback fund data when live fetch fails."""
     query_lower = query.lower()
+    fallback_data = get_fallback_funds()
     
-    for category, funds in FALLBACK_FUNDS.items():
+    for category, funds in fallback_data.items():
         if category in query_lower or query_lower in category:
             return [
                 FundResearchResult(
@@ -159,7 +215,7 @@ def _get_fallback_funds(query: str) -> list[FundResearchResult]:
     for keyword, category in fund_keywords.items():
         if keyword in query_lower:
             matching_funds = [
-                f for f in FALLBACK_FUNDS.get(category, [])
+                f for f in fallback_data.get(category, [])
                 if keyword in f["scheme_name"].lower() or keyword in f["fund_house"].lower()
             ]
             if matching_funds:
@@ -186,7 +242,7 @@ def _get_fallback_funds(query: str) -> list[FundResearchResult]:
             fund_house=f["fund_house"],
             returns=f["returns"],
         )
-        for f in FALLBACK_FUNDS.get("large cap", [])[:3]
+        for f in fallback_data.get("large cap", [])[:3]
     ]
 
 
@@ -286,7 +342,8 @@ def search_funds_by_category(category: str, limit: int = 10) -> list[FundResearc
     
     if not results:
         category_lower = category.lower()
-        if category_lower in FALLBACK_FUNDS:
+        fallback_data = get_fallback_funds()
+        if category_lower in fallback_data:
             results = [
                 FundResearchResult(
                     scheme_code=f["scheme_code"],
@@ -297,7 +354,7 @@ def search_funds_by_category(category: str, limit: int = 10) -> list[FundResearc
                     fund_house=f["fund_house"],
                     returns=f["returns"],
                 )
-                for f in FALLBACK_FUNDS[category_lower][:limit]
+                for f in fallback_data[category_lower][:limit]
             ]
     
     return results
@@ -313,10 +370,23 @@ def research_market_overview() -> MarketOverviewResult:
     logger.info("Researching market overview")
     stock_service = get_stock_service()
     
+    # Index symbol mappings for URLs
+    index_symbols = {
+        "NIFTY50": "^NSEI",
+        "SENSEX": "^BSESN",
+        "NIFTYBANK": "^NSEBANK",
+        "NIFTYIT": "^CNXIT",
+    }
+    
+    source_urls = {
+        name: get_yahoo_index_url(symbol) 
+        for name, symbol in index_symbols.items()
+    }
+    
     try:
         overview = stock_service.get_market_overview()
         if overview:
-            return MarketOverviewResult(indices=overview)
+            return MarketOverviewResult(indices=overview, source_urls=source_urls)
     except Exception as e:
         logger.error(f"Error fetching market overview: {e}")
     
@@ -325,5 +395,6 @@ def research_market_overview() -> MarketOverviewResult:
             "NIFTY50": {"value": 22453.20, "change_percent": 1.2},
             "SENSEX": {"value": 73917.15, "change_percent": 0.8},
             "NIFTYBANK": {"value": 48234.50, "change_percent": 1.5},
-        }
+        },
+        source_urls=source_urls
     )
