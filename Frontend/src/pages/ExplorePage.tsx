@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Search, Loader2, Compass, ArrowRight } from "lucide-react";
+import { Search, Loader2, Compass, ArrowRight, Sparkles } from "lucide-react";
 import { FundCard, FundDetailModal } from "../components/UIComponents";
+import { AIFundFinder } from "../components/AIFundFinder";
 import { Fund, FundDetail } from "../types";
 import { api } from "../services/api";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 
 export const ExplorePage: React.FC = () => {
   const [query, setQuery] = useState("");
@@ -12,6 +13,7 @@ export const ExplorePage: React.FC = () => {
   const [selectedFund, setSelectedFund] = useState<FundDetail | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isModalLoading, setIsModalLoading] = useState(false);
+  const [showAIFinder, setShowAIFinder] = useState(false);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -64,9 +66,26 @@ export const ExplorePage: React.FC = () => {
           <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 dark:text-zinc-100 mb-6 tracking-tight">
             Find the perfect fund for your goals.
           </h1>
-          <p className="text-zinc-500 dark:text-zinc-400 max-w-2xl mx-auto text-lg mb-10 leading-relaxed">
+          <p className="text-zinc-500 dark:text-zinc-400 max-w-2xl mx-auto text-lg mb-8 leading-relaxed">
             Search through thousands of mutual funds across categories. Analyze performance, risk metrics, and expense ratios in one place.
           </p>
+
+          {/* AI Fund Finder CTA */}
+          <motion.button
+            onClick={() => setShowAIFinder(true)}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="inline-flex items-center gap-3 bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-6 py-3 rounded-2xl font-bold mb-8 shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/30 transition-all"
+          >
+            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+              <Sparkles size={18} />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-bold">Let AI Help You</div>
+              <div className="text-xs text-white/80">Find your perfect fund in 30 seconds</div>
+            </div>
+            <ArrowRight size={20} className="ml-2" />
+          </motion.button>
 
           <div className="max-w-2xl mx-auto relative group">
             <div className="absolute inset-0 bg-zinc-900/5 dark:bg-white/5 blur-2xl group-hover:bg-zinc-900/10 dark:group-hover:white/10 transition-all rounded-full" />
@@ -137,6 +156,19 @@ export const ExplorePage: React.FC = () => {
         onClose={() => setIsModalOpen(false)}
         isLoading={isModalLoading}
       />
+
+      {/* AI Fund Finder Modal */}
+      <AnimatePresence>
+        {showAIFinder && (
+          <AIFundFinder
+            onFundSelect={(fund) => {
+              setShowAIFinder(false);
+              handleFundClick(fund);
+            }}
+            onClose={() => setShowAIFinder(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Bottom CTA - Hidden on mobile/tablet since we have navigation */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 hidden lg:block">
