@@ -802,57 +802,39 @@ async def run_agent(
         prompt_parts.append(f"\nUser question: {user_message}")
         
         # Add specific instructions based on query intent
-        if query_analysis.intent == "analyze" or "worth" in user_message.lower() or "should i" in user_message.lower():
+        is_analysis_query = query_analysis.intent == "analyze" or "worth" in user_message.lower() or "should i" in user_message.lower() or "buy" in user_message.lower()
+        
+        if is_analysis_query:
             prompt_parts.append("""
-## CRITICAL: This is an INVESTMENT ANALYSIS question - User wants your OPINION!
+## INVESTMENT ANALYSIS - Give your OPINION!
 
-Structure your response EXACTLY like this:
+Your response MUST include ALL of these sections:
 
-### 1. VERDICT (First line - be direct!)
-Start with: "**Verdict: [RECOMMENDED/CONSIDER WITH CAUTION/AVOID]**" followed by one sentence why.
+**1. VERDICT** - Start with "**Verdict: RECOMMENDED / CONSIDER WITH CAUTION / AVOID**" and why (1 sentence)
 
-### 2. PERFORMANCE ANALYSIS
+**2. PERFORMANCE TABLE**
 | Period | Return | Assessment |
 |--------|--------|------------|
-| 1 Year | X% | Good/Bad/Concerning |
-| 3 Year | X% | Above/Below average |
-| 5 Year | X% | Strong/Weak |
+| 1Y | X% | Good/Concerning |
+| 3Y | X% | Above/Below avg |
+| 5Y | X% | Strong/Weak |
 
-### 3. KEY INSIGHTS
-- Bullet point analysis of the data
-- Compare to category average if possible
-- Note any red flags or positives
+**3. WHY I RECOMMEND/DON'T RECOMMEND** (3-4 bullet points with data)
 
-### 4. WHO SHOULD INVEST
-- Risk profile: Conservative/Moderate/Aggressive
-- Time horizon: Short/Medium/Long term
-- Investment goal: Growth/Income/Tax saving
+**4. IDEAL INVESTOR** - Risk profile, time horizon, goals
 
-### 5. WHO SHOULD AVOID
-- List investor types this fund is NOT suitable for
+**5. WHO SHOULD AVOID** - List unsuitable investor types
 
-### 6. FINAL RECOMMENDATION
-One clear, actionable sentence.
-""")
+**6. BOTTOM LINE** - One actionable sentence
+
+IMPORTANT: Write at least 200 words. Be detailed and analytical, not just descriptive.""")
         else:
             prompt_parts.append("""
-## Response Instructions
-Provide a comprehensive, well-formatted response:
-
-1. **Start with a direct answer** to the user's question
-2. **Use ## headers** for main sections
-3. **Include data points** with analysis
-4. **End with actionable takeaways**
-""")
-        
-        prompt_parts.append("""
-FORMAT REQUIREMENTS:
-- Use markdown headers (## and ###)
-- Use bullet points (-) for lists
-- Use tables for data comparison
-- Keep paragraphs short (2-3 sentences)
-- NEVER write everything in one paragraph
-""")
+## Response Format
+- Start with direct answer
+- Use ## headers for sections  
+- Include bullet points for key info
+- End with actionable takeaway""")
         
         if user_profile:
             prompt_parts.append(f"\nRemember to consider the user's {user_profile.risk_tolerance.value} risk tolerance and {user_profile.investment_horizon.value.replace('_', ' ')} investment horizon.")
