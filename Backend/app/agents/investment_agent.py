@@ -576,10 +576,21 @@ DATE PERIOD REQUIREMENTS:
         
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"[AGENT] Error after {elapsed:.2f}s: {e}", exc_info=True)
+        error_msg = str(e)
+        logger.error(f"[AGENT] Error after {elapsed:.2f}s: {error_msg}", exc_info=True)
+        
+        # Provide more helpful error message based on error type
+        user_message_text = "I apologize, but I encountered an error processing your request. Please try rephrasing your question or ask about a specific mutual fund or stock."
+        
+        if "rate limit" in error_msg.lower():
+            user_message_text = "I'm currently experiencing high demand. Please wait a moment and try again."
+        elif "timeout" in error_msg.lower():
+            user_message_text = "The request took too long to process. Please try a simpler question."
+        elif "validation" in error_msg.lower() or "pydantic" in error_msg.lower():
+            user_message_text = "I had trouble formatting my response. Let me try to help with the data I found."
         
         return InvestmentResponse(
-            explanation="I apologize, but I encountered an error processing your request. Please try rephrasing your question or ask about a specific mutual fund or stock.",
+            explanation=user_message_text,
             data_points=create_data_points_from_data(fetched_data),
             sources=create_sources_from_data(fetched_data),
             risk_disclaimer=STANDARD_RISK_DISCLAIMER,

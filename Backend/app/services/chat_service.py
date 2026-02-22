@@ -53,8 +53,20 @@ class ChatService:
         return None
     
     def _cache_response(self, message: str, response: InvestmentResponse, profile: Optional[UserProfile] = None):
-        """Cache a response for future identical queries."""
+        """Cache a response for future identical queries. Skip caching error responses."""
         if not self._response_cache_enabled:
+            return
+        
+        # Don't cache error responses or low-confidence responses
+        if response.confidence_score and response.confidence_score < 0.5:
+            logger.info(f"Skipping cache for low-confidence response: {response.confidence_score}")
+            return
+        
+        # Don't cache responses that contain error messages
+        error_indicators = ["apologize", "error processing", "encountered an error", "try rephrasing"]
+        explanation_lower = (response.explanation or "").lower()
+        if any(indicator in explanation_lower for indicator in error_indicators):
+            logger.info("Skipping cache for error response")
             return
         
         cache_key = self._get_response_cache_key(message, profile)

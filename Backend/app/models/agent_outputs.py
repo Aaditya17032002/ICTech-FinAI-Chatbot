@@ -20,7 +20,7 @@ class Source(BaseModel):
 
 class InvestmentResponse(BaseModel):
     """Structured response from the investment advisor agent."""
-    explanation: str = Field(description="Clear, concise explanation answering the user's query")
+    explanation: str = Field(default="", description="Clear, concise explanation answering the user's query")
     data_points: list[DataPoint] = Field(
         default_factory=list,
         description="List of relevant data metrics supporting the answer"
