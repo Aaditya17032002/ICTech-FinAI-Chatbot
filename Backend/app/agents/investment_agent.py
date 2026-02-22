@@ -20,7 +20,7 @@ from app.agents.tools.researcher import (
     search_funds_by_category,
 )
 from app.utils.date_parser import (
-    parse_date_query,
+    parse_date_query_async,
     format_date_context,
     get_current_date_str,
     get_current_date_display,
@@ -267,7 +267,13 @@ def format_data_for_prompt(data: dict[str, Any], date_range: Optional[DateRange]
     
     if date_range:
         period_key = get_period_key_for_range(date_range)
-        sections.append(f"**Requested analysis period:** {date_range.period_label} (use {period_key} returns for comparison)\n")
+        sections.append(f"""
+**⚠️ USER'S REQUESTED TIME PERIOD: {date_range.period_label}**
+- Duration: ~{date_range.months} months ({date_range.years} years)
+- Best matching return period: **{period_key.upper()}** returns
+- YOU MUST use {period_key.upper()} returns when comparing funds for this query
+- DO NOT use 3Y returns if user asked for a ~1 year period
+""")
     
     if data.get("funds"):
         sections.append("## Real-Time Fund Data (Live from AMFI India):")
@@ -430,8 +436,8 @@ async def run_agent(
     """
     start_time = time.time()
     
-    # Parse date range from query
-    date_range = parse_date_query(user_message)
+    # Parse date range from query using LLM
+    date_range = await parse_date_query_async(user_message)
     if date_range:
         logger.info(f"[AGENT] Detected date range: {date_range.period_label}")
     
@@ -512,6 +518,13 @@ FORMAT REQUIREMENTS:
 - Add blank lines between sections
 - Keep paragraphs short (2-3 sentences)
 - NEVER write everything in one paragraph
+
+DATE PERIOD REQUIREMENTS:
+- If user specifies a time period (e.g., "march 2024 to april 2025"), use the MATCHING return period
+- For ~1 year periods, use 1Y returns (NOT 3Y)
+- For ~3 year periods, use 3Y returns
+- For ~5 year periods, use 5Y returns
+- Always mention the time period the user asked about in your response
 """)
         
         if user_profile:
@@ -552,8 +565,8 @@ async def run_agent_stream(
     conversation_history: list[dict[str, str]] = None
 ) -> AsyncGenerator[Any, None]:
     """Run the investment advisor agent with streaming output."""
-    # Parse date range from query
-    date_range = parse_date_query(user_message)
+    # Parse date range from query using LLM
+    date_range = await parse_date_query_async(user_message)
     if date_range:
         logger.info(f"[AGENT STREAM] Detected date range: {date_range.period_label}")
     
@@ -614,6 +627,13 @@ FORMAT REQUIREMENTS:
 - Keep paragraphs short (2-3 sentences)
 - NEVER write everything in one paragraph
 - Use ONLY the data provided above
+
+DATE PERIOD REQUIREMENTS:
+- If user specifies a time period (e.g., "march 2024 to april 2025"), use the MATCHING return period
+- For ~1 year periods, use 1Y returns (NOT 3Y)
+- For ~3 year periods, use 3Y returns
+- For ~5 year periods, use 5Y returns
+- Always mention the time period the user asked about in your response
 """)
         
         prompt = "\n".join(prompt_parts)
