@@ -125,13 +125,15 @@ RESPONSE STYLE:
 - Use simple language, avoid jargon
 - Give practical examples when helpful
 - Keep responses focused (2-4 paragraphs max)
+- Use markdown formatting (headers, bullets, bold)
 
 DO NOT:
 - Make up specific fund names or NAV values
 - Provide specific return percentages without data
 - Give personalized investment advice without knowing the user's profile
 
-If the user asks for specific fund data, NAV, or current prices, politely explain that you'd need to look up that information and ask them to rephrase their question to include specific fund names or categories."""
+IMPORTANT: Your response MUST include a clear, helpful explanation in the 'explanation' field.
+Always provide a substantive answer - never leave the explanation empty."""
 
 simple_qa_agent = Agent(
     fast_model,
@@ -557,6 +559,13 @@ Keep the response focused and practical.""")
         result = await simple_qa_agent.run(prompt, deps=deps)
         response = result.output
         
+        logger.info(f"[AGENT] Simple Q&A raw response: explanation={response.explanation[:100] if response.explanation else 'EMPTY'}...")
+        
+        # If explanation is empty, the LLM might have failed to generate properly
+        if not response.explanation or response.explanation.strip() == "":
+            logger.warning("[AGENT] Simple Q&A returned empty explanation, using fallback")
+            response.explanation = f"I can help explain that! {user_message} - Please let me provide a clear answer. Could you try asking again?"
+        
         # Simple queries don't have data points or sources
         response.data_points = []
         response.sources = []
@@ -568,14 +577,9 @@ Keep the response focused and practical.""")
         return response
         
     except Exception as e:
-        logger.error(f"[AGENT] Simple Q&A error: {e}", exc_info=True)
-        return InvestmentResponse(
-            explanation="I apologize, but I couldn't process your question. Please try rephrasing it.",
-            data_points=[],
-            sources=[],
-            risk_disclaimer="",
-            confidence_score=0.5,
-        )
+        logger.error(f"[AGENT] Simple Q&A error: {e}, falling back to data query flow", exc_info=True)
+        # Fall back to the regular data query flow
+        return None  # Signal to use regular flow
 
 
 async def run_agent(
@@ -604,7 +608,10 @@ async def run_agent(
     
     if simple_query:
         logger.info(f"[AGENT] Simple Q&A detected - answering directly without data fetch")
-        return await _handle_simple_query(user_message, conversation_history, user_profile, start_time)
+        result = await _handle_simple_query(user_message, conversation_history, user_profile, start_time)
+        if result is not None and result.explanation and result.explanation.strip():
+            return result
+        logger.info(f"[AGENT] Simple Q&A failed or empty, falling back to data query flow")
     
     # For data-dependent queries, proceed with full flow
     logger.info(f"[AGENT] Data query detected - fetching relevant data...")
